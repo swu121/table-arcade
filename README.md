@@ -4,7 +4,23 @@ Tablet games for a bar, played table against table. You claim a table number, ch
 another table on the floor plan, and pick something off the menu to play for. The loser's
 tab covers it, and a ticket lands on the staff screen so a server can run the item over.
 
-![Claiming a table](setup.png)
+![Choosing a table to challenge](docs/screenshots/floor-plan.png)
+
+The floor plan is the real room, so a table on screen is the table you're sitting at — you
+pick an opponent by looking across the bar and finding them on the plan. Yours is the gold
+one; the rest are open, in a game, or deciding.
+
+## Playing for something
+
+![Picking a game and a stake](docs/screenshots/pick-game-and-stake.png)
+
+Pick a game, pick what you're playing for, and the other table gets thirty seconds to answer.
+
+| | |
+| --- | --- |
+| ![An incoming challenge](docs/screenshots/challenge-incoming.png) | ![Losing a wager](docs/screenshots/result-lost.png) |
+
+Win, lose or draw, the result screen says who's paying. Every settled wager becomes a ticket.
 
 ## The games
 
@@ -15,7 +31,36 @@ tab covers it, and a ticket lands on the staff screen so a server can run the it
 | **Soju Run** | Simultaneous race | Fly the bottle through gates, furthest run wins |
 | **Stacker** | Simultaneous race | Climb 15 rows as the tower narrows and speeds up |
 
-Every table plays a bot if there's no human opponent, so the floor always looks busy.
+![Connect 4 mid-game](docs/screenshots/connect4.png)
+
+Every table plays a bot if there's no human opponent, so the floor always looks busy. Every
+game also has a way out: quit and the match goes to your opponent, with the item you played
+for on your tab.
+
+## Talking, and buying rounds
+
+| | |
+| --- | --- |
+| ![A thread between two tables](docs/screenshots/chat.png) | ![Sending a round](docs/screenshots/gift.png) |
+
+Tables can message each other — with read receipts, muting and blocking — or skip the game
+entirely and send a round, which goes straight to the bar on the sender's tab.
+
+## Staff screen
+
+`/staff` has two tabs.
+
+![The staff ticket queue](docs/screenshots/staff-tickets.png)
+
+**Tickets** — every settled wager and gift, who to charge, who to deliver to, and a "mark
+delivered" button, with a running total of what's sitting on tabs.
+
+![The floor plan editor](docs/screenshots/staff-floor-plan.png)
+
+**Floor plan** — a drag-and-drop editor for the room layout. Tables get dragged, resized,
+renumbered and reshaped; edits save to `data/floorplan.json` and push live to every connected
+tablet. Selecting a table shows its tab and its activity, and clearing it for the next party
+takes a confirmation listing what's about to go.
 
 ## How it fits together
 
@@ -37,17 +82,7 @@ tables play at once against a shared seeded course. The seed means both tablets 
 identical run without streaming any geometry between them.
 
 State lives in memory. There's no database and no auth — this is a pitch demo, and stopping
-the process wipes the room.
-
-## Staff screen
-
-`/staff` has two tabs:
-
-- **Tickets** — every settled wager, who to charge, who to deliver to, and a "mark delivered" button
-- **Floor plan** — a drag-and-drop editor for the room layout
-
-The floor plan is the real restaurant's layout, so a table on screen is the table you're
-sitting at. Edits save to `data/floorplan.json` and push live to every connected tablet.
+the process wipes the room. The floor plan is the one exception, and persists to disk.
 
 ## Running it
 
@@ -83,3 +118,9 @@ src/
 ```
 
 Built with React, Vite, Tailwind, Express and socket.io. Designed for a landscape tablet.
+
+## Full feature list
+
+[`docs/FEATURES.md`](docs/FEATURES.md) documents both sides of the room in detail — the whole
+guest flow, each game's rules, messaging and gifts, the staff tools, the architecture, and
+what was deliberately left out.
