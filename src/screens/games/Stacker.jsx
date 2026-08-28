@@ -20,7 +20,7 @@ function BlockGroup({ left, width, cols, className, style }) {
   )
 }
 
-export function Stacker({ game, act }) {
+export function Stacker({ game, act, onExit }) {
   const { course, startsAt, scoreLabel } = game.state
   const { rows, cols, height } = course
 
@@ -218,7 +218,7 @@ export function Stacker({ game, act }) {
   )
 
   return (
-    <GameFrame game={game} aside={aside}>
+    <GameFrame game={game} aside={aside} onExit={onExit}>
       <div className="stk-cabinet" onPointerDown={lock}>
         <div className="stk-crown" data-lit={outcome === 'top'}>
           <span className="overline leading-none">Top out</span>

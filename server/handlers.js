@@ -581,6 +581,13 @@ function sweep() {
 function onConnection(socket) {
   socket.emit('state:sync', buildSync(null))
 
+  // The sync sent on connection can land before the client has its listener
+  // attached, and an unassigned tablet has nothing else to say — without this it
+  // would sit on the connecting screen forever.
+  socket.on('state:hello', () => {
+    socket.emit('state:sync', buildSync(currentTable(socket)))
+  })
+
   socket.on('table:claim', ({ tableNumber } = {}) => {
     const number = Number(tableNumber)
     if (!Number.isInteger(number) || number < 1 || number > 99) {
@@ -926,6 +933,18 @@ function onConnection(socket) {
     }
 
     endGame(game, table.number, 'forfeit')
+    syncAll()
+  })
+
+  socket.on('game:forfeit', ({ gameId } = {}) => {
+    const table = currentTable(socket)
+    if (!table) return
+
+    const game = games.get(gameId)
+    if (!game || game.status !== 'active' || !game.players.includes(table.number)) return
+
+    // Distinct from 'forfeit', which is a claim on someone who never came back.
+    endGame(game, game.players.find((p) => p !== table.number), 'quit')
     syncAll()
   })
 

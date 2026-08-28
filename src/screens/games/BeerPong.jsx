@@ -95,7 +95,7 @@ function Splash({ at }) {
   )
 }
 
-export function BeerPong({ game, act }) {
+export function BeerPong({ game, act, onExit }) {
   const { turn, yourCups, theirCups, lastThrow } = game.state
 
   const tableRef = useRef(null)
@@ -353,7 +353,7 @@ export function BeerPong({ game, act }) {
   )
 
   return (
-    <GameFrame game={game} aside={aside}>
+    <GameFrame game={game} aside={aside} onExit={onExit}>
       <div className="bp-stage">
         <div className="bp-play">
           <div

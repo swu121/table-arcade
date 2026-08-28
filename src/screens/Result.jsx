@@ -44,11 +44,16 @@ function Line({ result }) {
   if (outcome === 'won') {
     return (
       <>
-        {reason === 'forfeit' ? (
+        {reason === 'forfeit' && (
           <>
             Table <span className="text-chalk">{pad(opponent)}</span> never came back.{' '}
           </>
-        ) : null}
+        )}
+        {reason === 'quit' && (
+          <>
+            Table <span className="text-chalk">{pad(opponent)}</span> walked away from it.{' '}
+          </>
+        )}
         Table <span className="text-chalk">{pad(opponent)}</span>&apos;s tab covers your{' '}
         <span className="text-chalk">{item.name}</span> — a server is bringing it over.
       </>
@@ -57,6 +62,7 @@ function Line({ result }) {
 
   return (
     <>
+      {reason === 'quit' && <>You called it early. </>}
       Your tab covers <span className="text-chalk">{item.name}</span> for Table{' '}
       <span className="text-chalk">{pad(opponent)}</span>. It&apos;s on its way to them.
     </>

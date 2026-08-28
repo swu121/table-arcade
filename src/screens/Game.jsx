@@ -53,15 +53,54 @@ function ReconnectOverlay({ game, onClaimWin }) {
   )
 }
 
-export function Game({ game, onAction, onClaimWin }) {
+// Walking out mid-game is a real thing to do, but it is not free, and the cost
+// is the whole point of the wager — so say it plainly before they commit.
+function ExitConfirm({ game, onCancel, onConfirm }) {
+  return (
+    <div className="anim-fade-in fixed inset-0 z-40 grid place-items-center bg-void/90 p-6 backdrop-blur-md">
+      <div className="panel w-full max-w-lg px-6 py-6 text-center">
+        <div className="overline">Leaving early</div>
+        <h2 className="display mt-2 text-[clamp(1.8rem,6vw,2.8rem)] leading-none text-chalk">
+          Forfeit to Table {pad(game.opponent)}?
+        </h2>
+        <p className="mt-3 text-sm text-dim">
+          Quit now and the match goes to them. The{' '}
+          <span className="text-chalk">{game.item.name}</span> you played for lands on your tab.
+        </p>
+
+        <div className="mt-6 flex gap-3">
+          <button type="button" className="btn btn-ghost h-14 flex-1 text-sm" onClick={onCancel}>
+            Keep playing
+          </button>
+          <button type="button" className="btn btn-danger h-14 flex-1 text-sm" onClick={onConfirm}>
+            Exit and forfeit
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function Game({ game, onAction, onClaimWin, onForfeit }) {
   const Screen = SCREENS[game.type] ?? Connect4
+  const [confirming, setConfirming] = useState(false)
 
   return (
     <>
       {/* Keyed so a rematch of the same game type remounts: the screens hold a
           whole run in local state and refs, which must not survive into the next
           game. Without this, "Run it back" starts already finished. */}
-      <Screen key={game.id} game={game} act={onAction} />
+      <Screen key={game.id} game={game} act={onAction} onExit={() => setConfirming(true)} />
+      {confirming && (
+        <ExitConfirm
+          game={game}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false)
+            onForfeit()
+          }}
+        />
+      )}
       {game.opponentGone && <ReconnectOverlay game={game} onClaimWin={onClaimWin} />}
     </>
   )

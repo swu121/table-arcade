@@ -2,7 +2,7 @@ import { Board } from '../../components/Board.jsx'
 import { GameFrame, Seat } from '../../components/GameChrome.jsx'
 import { pad } from '../../lib/format.js'
 
-export function Connect4({ game, act }) {
+export function Connect4({ game, act, onExit }) {
   const { board, turn, winningCells, lastMove } = game.state
   const yourTurn = turn === game.you
 
@@ -29,7 +29,7 @@ export function Connect4({ game, act }) {
   )
 
   return (
-    <GameFrame game={game} aside={aside}>
+    <GameFrame game={game} aside={aside} onExit={onExit}>
       <Board
         board={board}
         you={game.you}

@@ -53,12 +53,17 @@ export function ScoreTile({ label, value, unit, tone = 'text-chalk', lead }) {
  * play surface on the right. Every game screen renders inside this so the chrome
  * stays identical no matter what's being played.
  */
-export function GameFrame({ game, aside, children }) {
+export function GameFrame({ game, aside, onExit, children }) {
   return (
     <div className="relative z-10 flex h-full flex-col gap-3 p-3 lg:flex-row lg:gap-4 lg:p-4">
       <aside className="flex shrink-0 flex-col gap-2.5 lg:w-[20rem]">
         <StakeCard item={game.item} game={game.gameName} />
         {aside}
+        {onExit && (
+          <button type="button" className="btn btn-ghost h-11 shrink-0 text-xs lg:mt-auto" onClick={onExit}>
+            Exit game
+          </button>
+        )}
       </aside>
       <main className="board-stage grid min-h-0 flex-1 place-items-center">{children}</main>
     </div>

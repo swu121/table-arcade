@@ -220,7 +220,7 @@ function drawGround(ctx, w, h, camX) {
   for (let x = -off; x < w; x += spacing * h) ctx.fillRect(x, y + h * 0.012, h * 0.03, h * 0.006)
 }
 
-export function Flappy({ game, act }) {
+export function Flappy({ game, act, onExit }) {
   const stageRef = useRef(null)
   const canvasRef = useRef(null)
   const simRef = useRef(null)
@@ -571,7 +571,7 @@ export function Flappy({ game, act }) {
   )
 
   return (
-    <GameFrame game={game} aside={aside}>
+    <GameFrame game={game} aside={aside} onExit={onExit}>
       <div ref={stageRef} className="fl-stage" onPointerDown={flap}>
         <canvas ref={canvasRef} className="fl-canvas" />
 

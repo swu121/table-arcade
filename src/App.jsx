@@ -85,6 +85,7 @@ function TabletApp() {
     const onConnect = () => {
       setConnected(true)
       if (claimed.current) socket.emit('table:claim', { tableNumber: claimed.current })
+      else socket.emit('state:hello')
     }
 
     const onDisconnect = () => setConnected(false)
@@ -257,6 +258,7 @@ function TabletApp() {
         game={sync.game}
         onAction={(payload) => socket.emit('game:action', { gameId: sync.game.id, ...payload })}
         onClaimWin={() => socket.emit('game:claimWin', { gameId: sync.game.id })}
+        onForfeit={() => socket.emit('game:forfeit', { gameId: sync.game.id })}
       />
     )
   } else if (chatWith !== null) {
