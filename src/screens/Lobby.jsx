@@ -122,6 +122,7 @@ export function Lobby({ sync, mode = 'challenge', onPick, onReset, onBack }) {
                 statuses={statuses}
                 selfNumber={self?.number ?? null}
                 selectable={selectable}
+                unread={mode === 'message' ? sync.social?.unread : null}
                 onTableTap={onPick}
               />
             ) : (

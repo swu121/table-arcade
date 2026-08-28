@@ -315,6 +315,51 @@ function deliverMessage(from, target, body) {
   pushThread(target, from.number)
 }
 
+// A table turning over. Nothing the last party said, ordered or played should
+// follow them out the door and greet whoever sits down next.
+function wipeTable(table) {
+  if (table.challengeId) cancelChallenge(challenges.get(table.challengeId), 'cancelled')
+  if (table.gameId) {
+    const game = games.get(table.gameId)
+    if (game) voidGame(game)
+  }
+
+  const partners = new Set()
+  for (const [key, thread] of conversations) {
+    const pair = key.split('-').map(Number)
+    if (!pair.includes(table.number)) continue
+    conversations.delete(key)
+    if (thread.messages.length) partners.add(pair.find((n) => n !== table.number))
+  }
+
+  for (const [id, ticket] of tickets) {
+    if (ticket.owingTable === table.number || ticket.owedToTable === table.number) tickets.delete(id)
+  }
+
+  table.history = []
+  table.notifications = []
+  table.muted = []
+  table.blocked = []
+  table.unread = {}
+  table.lastResult = null
+  table.viewing = null
+  if (isOnline(table)) table.seatedAt = Date.now()
+  recomputeStatus(table)
+
+  // The other end of every wiped thread is still holding its own copy, and its
+  // inbox still quotes messages that no longer exist anywhere.
+  for (const other of partners) {
+    pushThread(table, other)
+    const partner = tables.get(other)
+    if (!partner) continue
+    delete partner.unread[table.number]
+    partner.notifications = partner.notifications.filter(
+      (entry) => !(entry.kind === 'message' && entry.fromTable === table.number)
+    )
+    pushThread(partner, table.number)
+  }
+}
+
 /* ----------------------------------------------------------------- game --- */
 
 // Everything a game module is allowed to reach for: who's a bot, a timer that
@@ -883,6 +928,13 @@ function onConnection(socket) {
     ticket.status = 'delivered'
     ticket.deliveredAt = Date.now()
     syncStaff()
+  })
+
+  socket.on('staff:clearTable', ({ number } = {}) => {
+    const table = tables.get(Number(number))
+    if (!table) return
+    wipeTable(table)
+    syncAll()
   })
 
   socket.on('staff:savePlan', ({ plan } = {}) => {

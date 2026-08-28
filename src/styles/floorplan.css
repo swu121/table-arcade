@@ -171,6 +171,40 @@
   fill: rgba(255, 182, 39, 0.75);
 }
 
+/* ---------------------------------------------------------------- chairs */
+
+.fp-chair {
+  pointer-events: none;
+  fill: rgba(139, 139, 163, 0.5);
+}
+
+.fp-table[data-status='idle'] .fp-chair {
+  fill: rgba(22, 224, 189, 0.6);
+}
+.fp-table[data-status='playing'] .fp-chair {
+  fill: rgba(255, 46, 99, 0.55);
+}
+.fp-table[data-status='challenging'] .fp-chair,
+.fp-table[data-status='challenged'] .fp-chair {
+  fill: rgba(255, 182, 39, 0.6);
+}
+.fp-table[data-status='offline'] .fp-chair {
+  fill: rgba(139, 139, 163, 0.22);
+}
+.fp-table[data-self='true'] .fp-chair {
+  fill: rgba(255, 182, 39, 0.85);
+}
+
+/* The table you are about to drop onto. */
+.fp-table[data-merge='true'] .fp-shape {
+  fill: rgba(22, 224, 189, 0.2);
+  stroke: var(--color-mint);
+  stroke-width: 4;
+}
+.fp-table[data-merge='true'] .fp-chair {
+  fill: rgba(22, 224, 189, 0.7);
+}
+
 .fp-halo {
   fill: none;
   stroke: var(--color-gold);
@@ -243,6 +277,45 @@
   stroke-width: 2.5;
   stroke-dasharray: 8 6;
   pointer-events: none;
+}
+
+/* ------------------------------------------------------------- edit grips */
+
+.fp-handle {
+  pointer-events: auto;
+  cursor: nwse-resize;
+}
+
+.fp-handle[data-corner='ne'],
+.fp-handle[data-corner='sw'] {
+  cursor: nesw-resize;
+}
+
+.fp-handle-box {
+  fill: var(--color-gold);
+  stroke: var(--color-void);
+  stroke-width: 1.5;
+}
+
+.fp-handle:active .fp-handle-box,
+.fp-overlay[data-mode='resize'] .fp-handle-box {
+  fill: #ffd479;
+}
+
+.fp-unread {
+  pointer-events: none;
+}
+
+.fp-unread-dot {
+  fill: var(--color-neon);
+  stroke: var(--color-void);
+  stroke-width: 2;
+}
+
+.fp-unread-count {
+  fill: #2a0110;
+  font-family: var(--font-ui);
+  font-weight: 800;
 }
 
 @media (hover: hover) {
