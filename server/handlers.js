@@ -5,10 +5,12 @@ import {
   MAX_MESSAGE,
   MAX_THREAD,
   MAX_NOTIFICATIONS,
+  MAX_HISTORY,
   tables,
   challenges,
   games,
   tickets,
+  conversations,
   getThread,
   nextId,
   makeTable,
@@ -133,14 +135,36 @@ function syncAll() {
     const table = number ? tables.get(number) : null
     socket.emit('state:sync', buildSync(table && table.socketId === socket.id ? table : null))
   }
+  syncStaff()
 }
 
 function ticketList() {
   return [...tickets.values()].sort((a, b) => b.createdAt - a.createdAt)
 }
 
+function floorList() {
+  return [...tables.values()]
+    .sort((a, b) => a.number - b.number)
+    .map((t) => ({
+      number: t.number,
+      status: t.status,
+      isBot: t.isBot,
+      seatedAt: t.seatedAt,
+      history: t.history
+    }))
+}
+
+const staffPayload = () => ({ tickets: ticketList(), floorplan: getPlan(), floor: floorList() })
+
 function syncStaff() {
-  io.to('staff').emit('staff:sync', { tickets: ticketList(), floorplan: getPlan() })
+  io.to('staff').emit('staff:sync', staffPayload())
+}
+
+// Chat never lands here — staff get the table's actions, not its conversations.
+function log(table, entry) {
+  if (!table) return
+  table.history.unshift({ id: nextId('h'), at: Date.now(), ...entry })
+  if (table.history.length > MAX_HISTORY) table.history.length = MAX_HISTORY
 }
 
 function socketFor(table) {
@@ -179,6 +203,8 @@ function cancelChallenge(challenge, reason) {
   detachChallenge(challenge)
 
   for (const number of [challenge.from, challenge.to]) {
+    const other = number === challenge.from ? challenge.to : challenge.from
+    log(tables.get(number), { kind: 'challengeEnded', otherTable: other, reason })
     const socket = socketFor(tables.get(number))
     if (socket) {
       socket.emit('challenge:ended', {
@@ -214,21 +240,53 @@ function cleanMessage(raw) {
 }
 
 function pushThread(table, otherNumber) {
+  const thread = getThread(table.number, otherNumber)
   socketFor(table)?.emit('chat:thread', {
     withTable: otherNumber,
-    messages: getThread(table.number, otherNumber).messages
+    messages: thread.messages,
+    readAt: thread.readAt[otherNumber] ?? 0
   })
 }
 
-function appendMessage(from, to, text) {
+function appendMessage(from, to, text, delivered) {
   const thread = getThread(from, to)
-  thread.messages.push({ id: nextId('m'), from, to, text, at: Date.now() })
+  thread.messages.push({
+    id: nextId('m'),
+    from,
+    to,
+    text,
+    at: Date.now(),
+    deliveredAt: delivered ? Date.now() : null
+  })
   if (thread.messages.length > MAX_THREAD) {
     thread.messages.splice(0, thread.messages.length - MAX_THREAD)
   }
 }
 
+// A table that reconnects after a drop has to collect everything that piled up
+// while its socket was gone, otherwise those messages read "Sent" forever.
+function flushDeliveries(table) {
+  const now = Date.now()
+  const partners = new Set()
+
+  for (const thread of conversations.values()) {
+    for (const message of thread.messages) {
+      if (message.to === table.number && !message.deliveredAt) {
+        message.deliveredAt = now
+        partners.add(message.from)
+      }
+    }
+  }
+
+  for (const other of partners) {
+    const sender = tables.get(other)
+    if (sender) pushThread(sender, table.number)
+  }
+}
+
 function markRead(table, otherNumber) {
+  getThread(table.number, otherNumber).readAt[table.number] = Date.now()
+
   let changed = Boolean(table.unread[otherNumber])
   delete table.unread[otherNumber]
   for (const entry of table.notifications) {
@@ -241,11 +299,13 @@ function markRead(table, otherNumber) {
 }
 
 function deliverMessage(from, target, body) {
-  appendMessage(from.number, target.number, body)
+  appendMessage(from.number, target.number, body, Boolean(socketFor(target)) || target.isBot)
 
-  // Muting silences the alert but not the conversation: the message still lands
-  // in the thread, it just never badges the inbox or raises a toast.
-  if (!target.muted.includes(from.number)) {
+  if (target.viewing === from.number) {
+    markRead(target, from.number)
+  } else if (!target.muted.includes(from.number)) {
+    // Muting silences the alert but not the conversation: the message still lands
+    // in the thread, it just never badges the inbox or raises a toast.
     target.unread[from.number] = (target.unread[from.number] ?? 0) + 1
     notify(target, { kind: 'message', fromTable: from.number, preview: body })
     socketFor(target)?.emit('chat:ping', { fromTable: from.number, preview: body })
@@ -310,6 +370,12 @@ function startGame(challenge) {
     table.gameId = game.id
     table.lastResult = null
     table.status = 'playing'
+    log(table, {
+      kind: 'gameStart',
+      otherTable: players.find((p) => p !== number),
+      gameName: mod.name,
+      item: game.item
+    })
   }
 
   mod.tick?.(game, game.ctx)
@@ -353,6 +419,7 @@ function endGame(game, winner, reason) {
       ticketId: ticket?.id ?? null
     }
     recomputeStatus(table)
+    log(table, { kind: 'result', ...table.lastResult })
     socketFor(table)?.emit('game:over', table.lastResult)
   }
 
@@ -411,6 +478,7 @@ function scheduleBotReply(botNumber, toNumber) {
     const bot = tables.get(botNumber)
     const target = tables.get(toNumber)
     if (!bot?.isBot || !target || isBlocked(target, botNumber)) return
+    markRead(bot, toNumber)
     deliverMessage(bot, target, BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)])
     syncAll()
   }, BOT_REPLY_MIN + Math.random() * BOT_REPLY_SPREAD).unref()
@@ -421,6 +489,7 @@ function scheduleBotThanks(botNumber, toNumber, item) {
     const bot = tables.get(botNumber)
     const target = tables.get(toNumber)
     if (!bot?.isBot || !target || isBlocked(target, botNumber)) return
+    markRead(bot, toNumber)
     deliverMessage(bot, target, `${item.name}?! You're a legend 🙏🍻`)
     syncAll()
   }, BOT_REPLY_MIN + Math.random() * BOT_REPLY_SPREAD).unref()
@@ -491,8 +560,14 @@ function onConnection(socket) {
 
     const table = existing ?? makeTable(number)
     tables.set(number, table)
+    const returning = table.socketId === socket.id
     table.socketId = socket.id
     socket.data.tableNumber = number
+    if (!returning) {
+      const first = table.seatedAt === null
+      if (first) table.seatedAt = Date.now()
+      log(table, { kind: first ? 'seated' : 'returned' })
+    }
 
     // Reconnecting into a frozen game unfreezes it.
     const game = table.gameId ? games.get(table.gameId) : null
@@ -502,6 +577,7 @@ function onConnection(socket) {
     }
 
     recomputeStatus(table)
+    flushDeliveries(table)
     syncAll()
   })
 
@@ -578,6 +654,9 @@ function onConnection(socket) {
       gameName: mod.name
     })
 
+    log(from, { kind: 'challenge', direction: 'out', otherTable: target.number, item: menuItem, gameName: mod.name })
+    log(target, { kind: 'challenge', direction: 'in', otherTable: from.number, item: menuItem, gameName: mod.name })
+
     socketFor(target)?.emit('challenge:incoming', {
       id: challenge.id,
       fromTable: challenge.from,
@@ -652,6 +731,9 @@ function onConnection(socket) {
     }
     tickets.set(ticket.id, ticket)
 
+    log(from, { kind: 'gift', direction: 'out', otherTable: target.number, item: menuItem })
+    log(target, { kind: 'gift', direction: 'in', otherTable: from.number, item: menuItem })
+
     notify(target, { kind: 'gift', fromTable: from.number, item: menuItem })
     socketFor(target)?.emit('gift:incoming', { fromTable: from.number, item: menuItem })
     socket.emit('gift:sent', { toTable: target.number, item: menuItem })
@@ -694,8 +776,21 @@ function onConnection(socket) {
     const other = Number(withTable)
     if (!Number.isInteger(other)) return
 
+    table.viewing = other
+    const changed = markRead(table, other)
     pushThread(table, other)
-    if (markRead(table, other)) syncAll()
+
+    // The other end is watching for its read receipts to flip, so it needs the
+    // thread again even though none of its own state moved.
+    const partner = tables.get(other)
+    if (partner) pushThread(partner, table.number)
+
+    if (changed) syncAll()
+  })
+
+  socket.on('chat:close', () => {
+    const table = currentTable(socket)
+    if (table) table.viewing = null
   })
 
   socket.on('chat:mute', ({ table: otherTable, muted } = {}) => {
@@ -779,7 +874,7 @@ function onConnection(socket) {
 
   socket.on('staff:join', () => {
     socket.join('staff')
-    socket.emit('staff:sync', { tickets: ticketList(), floorplan: getPlan() })
+    socket.emit('staff:sync', staffPayload())
   })
 
   socket.on('staff:deliver', ({ ticketId } = {}) => {
@@ -811,6 +906,8 @@ function onConnection(socket) {
     if (!table || table.socketId !== socket.id) return
 
     table.socketId = null
+    table.viewing = null
+    log(table, { kind: 'left' })
 
     if (table.challengeId) cancelChallenge(challenges.get(table.challengeId), 'disconnected')
 

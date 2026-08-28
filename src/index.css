@@ -575,11 +575,21 @@ button {
   -webkit-user-select: text;
 }
 
-.chat-stamp {
-  display: block;
+.chat-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
   margin-top: 0.2rem;
   font-size: 0.65rem;
   color: var(--color-dim);
+}
+
+.chat-receipt {
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-gold);
 }
 
 .chat-notice {

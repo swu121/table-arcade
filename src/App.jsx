@@ -100,8 +100,8 @@ function TabletApp() {
       if (line) showToast(line(otherTable))
     }
 
-    const onThread = ({ withTable, messages }) => {
-      setThreads((current) => ({ ...current, [withTable]: messages }))
+    const onThread = ({ withTable, messages, readAt }) => {
+      setThreads((current) => ({ ...current, [withTable]: { messages, readAt } }))
     }
 
     const onChatPing = ({ fromTable, preview }) => {
@@ -148,6 +148,13 @@ function TabletApp() {
     claimed.current = self.number
     localStorage.setItem(TABLE_KEY, String(self.number))
   }, [self])
+
+  // While a thread is on screen, arriving messages count as read — the server
+  // needs to know the moment it stops being on screen.
+  useEffect(() => {
+    if (chatWith === null) return
+    return () => socket.emit('chat:close')
+  }, [chatWith])
 
   // A challenge landing means the sheet's target is stale either way.
   useEffect(() => {
@@ -239,7 +246,8 @@ function TabletApp() {
       <Chat
         self={sync.self}
         withTable={chatWith}
-        messages={threads[chatWith] ?? []}
+        messages={threads[chatWith]?.messages ?? []}
+        readAt={threads[chatWith]?.readAt ?? 0}
         muted={social.muted.includes(chatWith)}
         blocked={social.blocked.includes(chatWith)}
         onBack={() => setChatWith(null)}
@@ -340,6 +348,7 @@ function StaffNav({ view, onChange }) {
 function StaffApp() {
   const [tickets, setTickets] = useState([])
   const [floorplan, setFloorplan] = useState(null)
+  const [floor, setFloor] = useState([])
   const [view, setView] = useState('tickets')
 
   useEffect(() => {
@@ -347,6 +356,7 @@ function StaffApp() {
     const onSync = (payload) => {
       setTickets(payload.tickets)
       setFloorplan(payload.floorplan)
+      setFloor(payload.floor ?? [])
     }
 
     socket.on('connect', join)
@@ -378,7 +388,7 @@ function StaffApp() {
             {nav}
           </header>
           <div className="min-h-0 flex-1">
-            {floorplan && <FloorPlanEditor floorplan={floorplan} />}
+            {floorplan && <FloorPlanEditor floorplan={floorplan} floor={floor} tickets={tickets} />}
           </div>
         </div>
       )}

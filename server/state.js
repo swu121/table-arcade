@@ -18,6 +18,7 @@ export const BOT_TABLES = [12, 17, 20]
 export const MAX_MESSAGE = 280
 export const MAX_THREAD = 200
 export const MAX_NOTIFICATIONS = 40
+export const MAX_HISTORY = 40
 
 export const tables = new Map()
 export const challenges = new Map()
@@ -33,7 +34,9 @@ export function getThread(a, b) {
   const key = threadKey(a, b)
   let thread = conversations.get(key)
   if (!thread) {
-    thread = { key, messages: [] }
+    // readAt is keyed by table number: the last moment that table opened the
+    // thread. Anything sent to them before it counts as read.
+    thread = { key, messages: [], readAt: {} }
     conversations.set(key, thread)
   }
   return thread
@@ -51,12 +54,19 @@ export function makeTable(number, isBot = false) {
     gameId: null,
     lastResult: null,
     isBot,
+    seatedAt: isBot ? Date.now() : null,
+    // Everything this table did tonight, newest first, for the staff view.
+    // Chat is deliberately absent: staff can see that tables talk, not what about.
+    history: [],
     notifications: [],
     // Muted: their messages still land in the thread, they just stop alerting.
     // Blocked: they cannot reach this table by message, gift or challenge.
     muted: [],
     blocked: [],
-    unread: {}
+    unread: {},
+    // The thread this table currently has on screen, so messages arriving while
+    // they watch count as read straight away.
+    viewing: null
   }
 }
 

@@ -14,7 +14,14 @@ function stamp(at) {
   return new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
-export function Chat({ self, withTable, messages, muted, blocked, onBack, onSend, onMute, onBlock }) {
+// Only the newest outgoing message carries a receipt — a column of them down the
+// thread is noise, and the latest one is the only status anyone is waiting on.
+function receiptFor(message, readAt) {
+  if (readAt >= message.at) return 'Read'
+  return message.deliveredAt ? 'Delivered' : 'Sent'
+}
+
+export function Chat({ self, withTable, messages, readAt, muted, blocked, onBack, onSend, onMute, onBlock }) {
   const [draft, setDraft] = useState('')
   const [picker, setPicker] = useState(false)
   const list = useRef(null)
@@ -24,6 +31,8 @@ export function Chat({ self, withTable, messages, muted, blocked, onBack, onSend
     const node = list.current
     if (node) node.scrollTop = node.scrollHeight
   }, [messages])
+
+  const lastMine = messages.findLastIndex((message) => message.from === self.number)
 
   const send = () => {
     const body = draft.trim()
@@ -92,12 +101,15 @@ export function Chat({ self, withTable, messages, muted, blocked, onBack, onSend
             </div>
           </div>
         ) : (
-          messages.map((message) => {
+          messages.map((message, i) => {
             const mine = message.from === self.number
             return (
               <div key={message.id} className={`chat-bubble ${mine ? 'chat-bubble--mine' : ''}`}>
                 <span className="chat-text">{message.text}</span>
-                <span className="chat-stamp">{stamp(message.at)}</span>
+                <div className="chat-foot">
+                  <span>{stamp(message.at)}</span>
+                  {i === lastMine && <span className="chat-receipt">{receiptFor(message, readAt)}</span>}
+                </div>
               </div>
             )
           })
