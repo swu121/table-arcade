@@ -1,0 +1,422 @@
+/* Beer Pong — perspective table, solo cups, two-meter aim.
+   Depth/lateral placement is computed in BeerPong.jsx and arrives here as
+   percentages, so everything below is purely paint. */
+
+.bp-stage {
+  position: relative;
+  width: min(100cqw, calc(100cqh * 1.26));
+  aspect-ratio: 1.26;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6cqh;
+  touch-action: manipulation;
+}
+
+.bp-play {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 1.1cqw;
+}
+
+.bp-table {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 26px;
+  border: 1px solid #34344a;
+  background:
+    radial-gradient(120% 78% at 50% 4%, rgba(255, 182, 39, 0.09), transparent 62%),
+    linear-gradient(180deg, #101018 0%, #171722 46%, #22222f 100%);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -20px 40px -22px rgba(0, 0, 0, 0.95),
+    0 30px 60px -30px rgba(0, 0, 0, 1);
+}
+
+.bp-felt {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Haze over the far end so distance reads as distance, not just small cups. */
+.bp-table::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(7, 7, 11, 0.72) 0%, rgba(7, 7, 11, 0) 34%);
+}
+
+/* ------------------------------------------------------------------- cups */
+
+.bp-cup {
+  position: absolute;
+  width: var(--w);
+  aspect-ratio: 0.82;
+  transform: translate(-50%, -74%);
+  transition: opacity 260ms ease;
+}
+
+.bp-cup-body {
+  position: absolute;
+  inset: 7% 0 0 0;
+  clip-path: polygon(0% 0%, 100% 0%, 81% 100%, 19% 100%);
+  background:
+    linear-gradient(96deg, rgba(0, 0, 0, 0.42) 0%, rgba(0, 0, 0, 0) 26%, rgba(255, 255, 255, 0.26) 44%, rgba(255, 255, 255, 0) 62%, rgba(0, 0, 0, 0.5) 100%),
+    linear-gradient(180deg, #f0364f 0%, #d21b38 42%, #8e0c22 100%);
+}
+
+.bp-cup-rim {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 15%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 42%, #4a0512 0%, #6d0a1c 58%, #ff5c73 76%, #ffb3bd 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.bp-cup-beer {
+  position: absolute;
+  left: 8%;
+  top: 3.2%;
+  width: 84%;
+  height: 11%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 38%, #ffdf9a 0%, #f0a91c 62%, #b06a05 100%);
+  opacity: 0.9;
+}
+
+.bp-cup[data-live='false'] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bp-cup[data-sinking='true'] {
+  animation: bp-sink 460ms cubic-bezier(0.5, 0, 0.75, 0) both;
+}
+
+@keyframes bp-sink {
+  0% {
+    transform: translate(-50%, -74%) scale(1);
+    opacity: 1;
+  }
+  22% {
+    transform: translate(-50%, -70%) scale(1.1, 0.9);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -66%) scale(0.3);
+    opacity: 0;
+  }
+}
+
+/* Faint marker left where a cup used to stand — keeps the rack legible. */
+.bp-ghost {
+  position: absolute;
+  width: var(--w);
+  aspect-ratio: 2.6;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 50%, rgba(255, 46, 99, 0.16) 0%, rgba(255, 46, 99, 0) 70%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+/* ------------------------------------------------------------------- ball */
+
+.bp-ball {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--d, 3%);
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background: radial-gradient(circle at 33% 27%, #ffffff 0%, #ece9df 40%, #9a978c 100%);
+  box-shadow:
+    0 0 14px rgba(247, 245, 240, 0.42),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.3);
+  will-change: transform;
+  pointer-events: none;
+  z-index: 400;
+}
+
+.bp-shadow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--d, 3%);
+  aspect-ratio: 2.4;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.5);
+  filter: blur(2px);
+  will-change: transform;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ----------------------------------------------------------------- splash */
+
+.bp-splash {
+  position: absolute;
+  width: var(--w);
+  aspect-ratio: 1;
+  transform: translate(-50%, -60%);
+  pointer-events: none;
+  z-index: 380;
+}
+
+.bp-splash i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14%;
+  aspect-ratio: 1;
+  margin: -7% 0 0 -7%;
+  border-radius: 999px;
+  background: radial-gradient(circle at 40% 32%, #ffe9b0, #f0a91c);
+  animation: bp-drop 620ms cubic-bezier(0.2, 0.8, 0.4, 1) both;
+}
+
+.bp-splash em {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 223, 154, 0.9);
+  animation: bp-ring 560ms ease-out both;
+}
+
+@keyframes bp-ring {
+  0% {
+    transform: scale(0.15);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+@keyframes bp-drop {
+  0% {
+    transform: translate(0, 0) scale(0.4);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy)) scale(0.9);
+    opacity: 0;
+  }
+}
+
+/* ------------------------------------------------------------- aim marker */
+
+.bp-aim {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: var(--w);
+  aspect-ratio: 2.5;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 182, 39, 0.85);
+  background: rgba(255, 182, 39, 0.14);
+  box-shadow: 0 0 22px rgba(255, 182, 39, 0.35);
+  pointer-events: none;
+  z-index: 350;
+  will-change: transform, width;
+}
+
+/* ------------------------------------------------------------------ banner */
+
+.bp-banner {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  z-index: 420;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.bp-banner-hit {
+  animation: bp-banner 1500ms cubic-bezier(0.2, 1.1, 0.35, 1) both;
+}
+
+@keyframes bp-banner {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.6);
+  }
+  16% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.94);
+  }
+  26% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  78% {
+    opacity: 1;
+    transform: translate(-50%, -54%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -66%) scale(1);
+  }
+}
+
+/* ------------------------------------------------------------------ meters */
+
+.bp-deck {
+  display: flex;
+  align-items: stretch;
+  gap: 1.1cqw;
+  flex: 0 0 auto;
+  height: 9cqh;
+  min-height: 46px;
+}
+
+.bp-meter {
+  position: relative;
+  border-radius: 16px;
+  border: 1px solid var(--color-edge);
+  background: linear-gradient(180deg, #14141d 0%, #0a0a11 100%);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+
+.bp-meter[data-armed='true'] {
+  border-color: rgba(255, 182, 39, 0.6);
+}
+
+.bp-meter[data-set='true'] {
+  border-color: rgba(22, 224, 189, 0.7);
+}
+
+/* The shaded band is the stretch of the meter that can still reach a live cup. */
+.bp-zone {
+  position: absolute;
+  background: rgba(22, 224, 189, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(22, 224, 189, 0.28);
+  transition:
+    left 300ms ease,
+    right 300ms ease,
+    top 300ms ease,
+    bottom 300ms ease;
+}
+
+.bp-angle {
+  height: 100%;
+  flex: 1;
+  min-width: 0;
+}
+
+.bp-angle .bp-zone {
+  top: 0;
+  bottom: 0;
+}
+
+.bp-angle-needle {
+  position: absolute;
+  left: 0;
+  top: 4%;
+  bottom: 4%;
+  width: 6px;
+  margin-left: -3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffe08a, #ffb627 46%, #e0700d);
+  box-shadow: 0 0 16px rgba(255, 182, 39, 0.8);
+  will-change: transform;
+}
+
+.bp-angle-needle[data-set='true'] {
+  background: linear-gradient(180deg, #9ff6e5, #16e0bd 50%, #0b9c84);
+  box-shadow: 0 0 16px rgba(22, 224, 189, 0.8);
+}
+
+.bp-pip {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  border-radius: 999px;
+  background: #ff2e63;
+  box-shadow: 0 0 6px rgba(255, 46, 99, 0.7);
+}
+
+.bp-pip[data-live='false'] {
+  background: var(--color-edge);
+  box-shadow: none;
+}
+
+.bp-power {
+  width: 4.6cqw;
+  min-width: 46px;
+  flex: 0 0 auto;
+}
+
+.bp-power .bp-zone {
+  left: 0;
+  right: 0;
+}
+
+.bp-power-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 100%;
+  transform-origin: 50% 100%;
+  background: linear-gradient(0deg, #e0700d 0%, #ffb627 55%, #ffe08a 100%);
+  box-shadow: 0 0 20px rgba(255, 182, 39, 0.45);
+  will-change: transform;
+}
+
+.bp-power-fill[data-set='true'] {
+  background: linear-gradient(0deg, #0b9c84 0%, #16e0bd 55%, #9ff6e5 100%);
+}
+
+.bp-tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+/* ------------------------------------------------------------------- hint */
+
+.bp-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 3.5%;
+  transform: translateX(-50%);
+  z-index: 430;
+  pointer-events: none;
+  padding: 0.5rem 1.1rem;
+  border-radius: 999px;
+  background: rgba(7, 7, 11, 0.82);
+  border: 1px solid var(--color-edge);
+  backdrop-filter: blur(6px);
+}
+
+.bp-hint[data-armed='true'] {
+  border-color: rgba(255, 182, 39, 0.6);
+}
+
+.bp-run {
+  animation: bp-run 900ms ease-in-out infinite;
+}
+
+@keyframes bp-run {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}

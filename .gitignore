@@ -1,0 +1,10 @@
+node_modules
+dist
+.DS_Store
+*.log
+.env
+.fly
+
+# Runtime state: the server falls back to defaultPlan() when this is absent.
+data/
+.playwright-mcp

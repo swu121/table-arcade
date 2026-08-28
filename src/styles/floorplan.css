@@ -1,0 +1,259 @@
+/* Floor plan renderer. Plain CSS on purpose — this file is imported from a
+   component, outside the Tailwind entry, so it can only use the @theme vars. */
+
+.fp-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Absolute so the SVG can never push its flex parent taller than the space
+   it was given — the lobby must not scroll. */
+.fp-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+.fp-wrap--drag {
+  touch-action: none;
+}
+
+.fp-floor {
+  fill: rgba(7, 7, 11, 0.55);
+  stroke: var(--color-edge);
+  stroke-width: 2;
+}
+
+.fp-grid-line {
+  stroke: rgba(139, 139, 163, 0.13);
+  stroke-width: 1;
+}
+
+.fp-grid-line--major {
+  stroke: rgba(139, 139, 163, 0.24);
+}
+
+.fp-label {
+  pointer-events: none;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  fill: var(--color-dim);
+}
+
+.fp-num {
+  pointer-events: none;
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  fill: var(--color-chalk);
+}
+
+.fp-seats {
+  pointer-events: none;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  fill: var(--color-dim);
+}
+
+/* ------------------------------------------------------------- fixtures */
+
+.fp-fixture {
+  pointer-events: none;
+}
+
+.fp-fixture .fp-fixture-box {
+  fill: rgba(30, 30, 43, 0.72);
+  stroke: var(--color-edge);
+  stroke-width: 2;
+}
+
+.fp-fixture[data-kind='bar'] .fp-fixture-box {
+  fill: rgba(255, 182, 39, 0.1);
+  stroke: rgba(255, 182, 39, 0.42);
+}
+
+.fp-fixture[data-kind='bar'] .fp-label {
+  fill: rgba(255, 182, 39, 0.82);
+}
+
+.fp-fixture[data-kind='kitchen'] .fp-fixture-box {
+  fill: rgba(139, 139, 163, 0.1);
+  stroke: rgba(139, 139, 163, 0.36);
+}
+
+.fp-fixture[data-kind='door'] .fp-fixture-box {
+  fill: rgba(22, 224, 189, 0.08);
+  stroke: rgba(22, 224, 189, 0.5);
+  stroke-dasharray: 10 8;
+}
+
+.fp-fixture[data-kind='door'] .fp-label {
+  fill: rgba(22, 224, 189, 0.8);
+}
+
+.fp-fixture[data-kind='wall'] .fp-fixture-box {
+  fill: rgba(44, 44, 61, 0.9);
+  stroke: rgba(44, 44, 61, 1);
+}
+
+/* ---------------------------------------------------------------- tables */
+
+.fp-table {
+  pointer-events: none;
+}
+
+.fp-shape {
+  fill: rgba(21, 21, 31, 0.94);
+  stroke: var(--color-edge);
+  stroke-width: 2.5;
+  transition:
+    stroke 180ms ease,
+    fill 180ms ease;
+}
+
+.fp-table[data-status='idle'] .fp-shape {
+  fill: rgba(22, 224, 189, 0.13);
+  stroke: var(--color-mint);
+}
+.fp-table[data-status='idle'] .fp-num {
+  fill: #bff6ec;
+}
+
+.fp-table[data-status='playing'] .fp-shape {
+  fill: rgba(255, 46, 99, 0.12);
+  stroke: rgba(255, 46, 99, 0.72);
+}
+.fp-table[data-status='playing'] .fp-num {
+  fill: #ff9bb5;
+}
+
+.fp-table[data-status='challenging'] .fp-shape,
+.fp-table[data-status='challenged'] .fp-shape {
+  fill: rgba(255, 182, 39, 0.14);
+  stroke: var(--color-gold);
+}
+.fp-table[data-status='challenging'] .fp-num,
+.fp-table[data-status='challenged'] .fp-num {
+  fill: #ffdb96;
+}
+
+.fp-table[data-status='offline'] .fp-shape {
+  fill: rgba(255, 255, 255, 0.02);
+  stroke: rgba(44, 44, 61, 0.95);
+  stroke-dasharray: 7 7;
+}
+.fp-table[data-status='offline'] .fp-num {
+  fill: rgba(139, 139, 163, 0.42);
+}
+.fp-table[data-status='offline'] .fp-seats {
+  fill: rgba(139, 139, 163, 0.28);
+}
+
+/* You are here. Deliberately the loudest thing on the floor. */
+.fp-table[data-self='true'] .fp-shape {
+  fill: rgba(255, 182, 39, 0.24);
+  stroke: var(--color-gold);
+  stroke-width: 4;
+}
+.fp-table[data-self='true'] .fp-num {
+  fill: var(--color-gold);
+}
+.fp-table[data-self='true'] .fp-seats {
+  fill: rgba(255, 182, 39, 0.75);
+}
+
+.fp-halo {
+  fill: none;
+  stroke: var(--color-gold);
+  stroke-width: 2.5;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: fp-halo 2.4s ease-out infinite;
+}
+
+@keyframes fp-halo {
+  0% {
+    opacity: 0.75;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.34);
+  }
+}
+
+.fp-you {
+  pointer-events: none;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  fill: var(--color-gold);
+}
+
+/* ------------------------------------------------------------- targeting */
+
+.fp-hit {
+  fill: transparent;
+  stroke: none;
+}
+
+.fp-item {
+  pointer-events: none;
+}
+
+.fp-item[data-active='true'] {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.fp-item[data-drag='true'] {
+  cursor: grab;
+}
+
+.fp-item[data-drag='true']:active {
+  cursor: grabbing;
+}
+
+/* No hover on the tablet, so tappable tables get a permanent affordance. */
+.fp-pick {
+  fill: none;
+  stroke: rgba(255, 182, 39, 0.55);
+  stroke-width: 2;
+  stroke-dasharray: 5 6;
+  pointer-events: none;
+}
+
+.fp-item[data-active='true']:active .fp-shape {
+  fill: rgba(255, 182, 39, 0.3);
+}
+
+.fp-selected {
+  fill: none;
+  stroke: var(--color-gold);
+  stroke-width: 2.5;
+  stroke-dasharray: 8 6;
+  pointer-events: none;
+}
+
+@media (hover: hover) {
+  .fp-item[data-active='true']:hover .fp-shape {
+    stroke: var(--color-gold);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fp-halo {
+    animation: none;
+    opacity: 0.4;
+  }
+}

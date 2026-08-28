@@ -1,0 +1,321 @@
+/* ------------------------------------------------------------- cabinet */
+
+.stk-cabinet {
+  position: relative;
+  height: min(100cqh, calc(100cqw / 0.64));
+  aspect-ratio: 0.64;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 2.2%;
+  padding: 3.2% 3.4% 3.6%;
+  border-radius: 26px;
+  background: linear-gradient(168deg, #262636 0%, #171722 55%, #101018 100%);
+  border: 1px solid #34344a;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -14px 28px -18px rgba(0, 0, 0, 0.9),
+    0 30px 60px -30px rgba(0, 0, 0, 1);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.stk-crown {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 182, 39, 0.22);
+  background: linear-gradient(178deg, rgba(255, 182, 39, 0.12), rgba(255, 182, 39, 0.03));
+  transition:
+    border-color 240ms ease,
+    box-shadow 240ms ease;
+}
+
+.stk-crown[data-lit='true'] {
+  border-color: rgba(255, 182, 39, 0.85);
+  box-shadow:
+    inset 0 0 24px rgba(255, 182, 39, 0.28),
+    0 0 34px -6px rgba(255, 182, 39, 0.65);
+}
+
+.stk-crown-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- tower */
+
+.stk-body {
+  position: relative;
+  display: flex;
+  gap: 3%;
+  min-height: 0;
+}
+
+.stk-tower {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column-reverse;
+}
+
+.stk-row {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.stk-row[data-tier='true']::before {
+  content: '';
+  position: absolute;
+  left: -1.5%;
+  right: -1.5%;
+  bottom: 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.stk-wells {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 7), 1fr);
+}
+
+.stk-well::after {
+  content: '';
+  position: absolute;
+  inset: 8% 4%;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.026);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.018);
+}
+
+.stk-wells > span {
+  position: relative;
+}
+
+/* --------------------------------------------------------------- blocks */
+
+.stk-group {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+}
+
+.stk-block {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.stk-block::after {
+  content: '';
+  position: absolute;
+  inset: 8% 4%;
+  border-radius: 5px;
+  background: linear-gradient(178deg, #ffd77a 0%, #ffb627 46%, #c07d09 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    inset 0 -2px 5px rgba(0, 0, 0, 0.36),
+    0 2px 9px rgba(255, 182, 39, 0.22);
+}
+
+/* The moving row glides between cells; the duration is a fraction of the row's
+   ms-per-cell so the block always settles before the next step is issued. */
+.stk-group-live {
+  transition-property: left;
+  transition-timing-function: linear;
+  will-change: left;
+  z-index: 3;
+}
+
+.stk-group-live .stk-block::after {
+  background: linear-gradient(178deg, #fff5da 0%, #ffd05a 46%, #e08a10 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 -2px 5px rgba(0, 0, 0, 0.28),
+    0 0 20px rgba(255, 182, 39, 0.6);
+  animation: stk-live 880ms ease-in-out infinite;
+}
+
+@keyframes stk-live {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.24);
+  }
+}
+
+.stk-group-set .stk-block::after {
+  animation: stk-set 420ms cubic-bezier(0.2, 1, 0.35, 1) both;
+}
+
+@keyframes stk-set {
+  0% {
+    transform: translateY(-10%);
+    filter: brightness(2.6);
+  }
+  55% {
+    transform: translateY(0);
+    filter: brightness(1.35);
+  }
+  100% {
+    transform: none;
+    filter: none;
+  }
+}
+
+/* ----------------------------------------------------------------- chop */
+
+.stk-chop {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 4;
+  pointer-events: none;
+  animation: stk-chop 660ms cubic-bezier(0.35, 0.05, 0.75, 0.55) forwards;
+}
+
+.stk-chop::after {
+  content: '';
+  position: absolute;
+  inset: 8% 4%;
+  border-radius: 5px;
+  background: linear-gradient(178deg, #ffd77a 0%, #ffb627 46%, #c07d09 100%);
+  box-shadow: 0 0 16px rgba(255, 182, 39, 0.45);
+}
+
+@keyframes stk-chop {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg);
+  }
+  16% {
+    opacity: 1;
+    transform: translate(calc(var(--dx) * 0.3), -26%) rotate(calc(var(--rot) * 0.22));
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), 430%) rotate(var(--rot));
+  }
+}
+
+/* -------------------------------------------------------------- opponent */
+
+.stk-oppline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  z-index: 5;
+  pointer-events: none;
+  border-top: 1px dashed rgba(255, 46, 99, 0.5);
+  transition: bottom 420ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+.stk-oppline::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: -5px;
+  border: 5px solid transparent;
+  border-left-color: var(--color-neon);
+}
+
+.stk-gauge {
+  position: relative;
+  width: 6.5%;
+  min-width: 9px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+}
+
+.stk-tick {
+  flex: 1;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 220ms ease;
+}
+
+.stk-tick[data-on='true'] {
+  background: linear-gradient(90deg, rgba(255, 46, 99, 0.45), #ff2e63);
+  box-shadow: 0 0 10px rgba(255, 46, 99, 0.45);
+}
+
+.stk-tick[data-head='true'] {
+  animation: stk-head 1.3s ease-in-out infinite;
+}
+
+@keyframes stk-head {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* ------------------------------------------------------------- overlays */
+
+.stk-count {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  border-radius: 26px;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 45%, rgba(7, 7, 11, 0.82), rgba(7, 7, 11, 0.95));
+  backdrop-filter: blur(3px);
+}
+
+/* The first row is already sliding on GO, so let it read through. */
+.stk-count[data-go='true'] {
+  background: radial-gradient(ellipse at 50% 45%, rgba(7, 7, 11, 0.34), rgba(7, 7, 11, 0.06));
+  backdrop-filter: none;
+}
+
+.stk-count-num {
+  font-size: clamp(3.5rem, 22cqh, 11rem);
+  line-height: 0.85;
+}
+
+.stk-stamp {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 34%;
+  z-index: 7;
+  text-align: center;
+  pointer-events: none;
+}
+
+.stk-stamp-text {
+  font-size: clamp(1.6rem, 7cqh, 3.6rem);
+  line-height: 0.9;
+  letter-spacing: 0.04em;
+  text-shadow: 0 6px 26px rgba(0, 0, 0, 0.95);
+}
+
+.stk-pip {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.stk-pip[data-on='true'] {
+  background: linear-gradient(178deg, #ffd77a, #e08a10);
+  box-shadow: 0 0 10px rgba(255, 182, 39, 0.5);
+}

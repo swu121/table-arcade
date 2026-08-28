@@ -1,0 +1,163 @@
+/* Soju Run — play surface chrome. The canvas itself draws the world. */
+
+.fl-stage {
+  position: relative;
+  /* Both tablets must see the same slice of the course, so the play surface is
+     locked to one aspect ratio and letterboxed instead of filling the stage. */
+  width: min(100cqw, calc(100cqh * 1.6));
+  aspect-ratio: 1.6;
+  margin-inline: auto;
+  container-type: inline-size;
+  overflow: hidden;
+  border-radius: 24px;
+  border: 1px solid #34344a;
+  background: #07070b;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.07),
+    0 30px 60px -30px rgba(0, 0, 0, 1);
+  touch-action: none;
+  cursor: pointer;
+}
+
+.fl-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.fl-veil {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 6%;
+  pointer-events: none;
+}
+
+.fl-veil-dim {
+  background: radial-gradient(ellipse at 50% 50%, rgba(7, 7, 11, 0.62) 0%, rgba(7, 7, 11, 0.9) 100%);
+  backdrop-filter: blur(3px);
+}
+
+.fl-count {
+  font-size: clamp(5rem, 22cqw, 13rem);
+  line-height: 0.8;
+  color: var(--color-chalk);
+  text-shadow: 0 0 60px rgba(255, 182, 39, 0.5);
+  animation: fl-count-pop 900ms cubic-bezier(0.2, 1.1, 0.35, 1) both;
+}
+
+.fl-go {
+  font-size: clamp(4rem, 18cqw, 10rem);
+  line-height: 0.8;
+  animation: fl-go-out 700ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+@keyframes fl-count-pop {
+  0% {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+  22% {
+    opacity: 1;
+    transform: scale(0.92);
+  }
+  38% {
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0.55;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes fl-go-out {
+  0% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+.fl-ring {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 26%;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 182, 39, 0.55);
+  animation: fl-ring-out 900ms ease-out infinite;
+}
+
+@keyframes fl-ring-out {
+  0% {
+    opacity: 0.8;
+    transform: scale(0.55);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+}
+
+.fl-hint {
+  position: absolute;
+  bottom: 5%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  pointer-events: none;
+  animation: fl-hint-bob 1.8s ease-in-out infinite;
+}
+
+@keyframes fl-hint-bob {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-6px);
+  }
+}
+
+.fl-out {
+  font-size: clamp(2.6rem, 11cqw, 6rem);
+  line-height: 0.86;
+}
+
+.fl-rail {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.fl-rail-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  transition: width 260ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+.fl-rail-you {
+  background: linear-gradient(90deg, #e0700d, #ffb627);
+  box-shadow: 0 0 12px rgba(255, 182, 39, 0.6);
+}
+
+.fl-rail-them {
+  background: linear-gradient(90deg, #9e0a33, #ff2e63);
+  box-shadow: 0 0 12px rgba(255, 46, 99, 0.5);
+}
