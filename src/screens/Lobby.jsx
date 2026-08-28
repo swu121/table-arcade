@@ -3,6 +3,7 @@ import { Wordmark } from '../components/Logo.jsx'
 import { TableCard } from '../components/Bits.jsx'
 import { FloorPlan } from '../components/FloorPlan.jsx'
 import { pad } from '../lib/format.js'
+import { useHold } from '../lib/hold.js'
 
 const LEGEND = [
   { label: 'Open', className: 'chip-open' },
@@ -45,6 +46,7 @@ export function Lobby({ sync, mode = 'challenge', onPick, onReset, onBack }) {
   const lobby = sync.lobby ?? []
   const blocked = sync.social?.blocked ?? []
   const copy = MODES[mode] ?? MODES.challenge
+  const tableHold = useHold(onReset)
 
   const { statuses, selectable, offPlan } = useMemo(() => {
     const statuses = new Map()
@@ -78,9 +80,9 @@ export function Lobby({ sync, mode = 'challenge', onPick, onReset, onBack }) {
         </div>
         <button
           type="button"
-          onClick={onReset}
+          {...tableHold}
           className="panel flex items-center gap-3 px-4 py-2 text-left"
-          title="Change table number"
+          title="Hold to reassign this tablet"
         >
           <span className="overline leading-none">You are</span>
           <span className="display tnum text-2xl leading-none gold-text">{pad(self.number)}</span>

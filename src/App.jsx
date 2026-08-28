@@ -4,6 +4,7 @@ import { useWakeLock } from './useWakeLock.js'
 import { Backdrop, OfflineBanner, Toast } from './components/Bits.jsx'
 import { Mark, Wordmark } from './components/Logo.jsx'
 import { Setup } from './screens/Setup.jsx'
+import { Launch } from './screens/Launch.jsx'
 import { Home } from './screens/Home.jsx'
 import { Lobby } from './screens/Lobby.jsx'
 import { Chat } from './screens/Chat.jsx'
@@ -64,6 +65,7 @@ function TabletApp() {
   const [wagerTarget, setWagerTarget] = useState(null)
   const [giftTarget, setGiftTarget] = useState(null)
   const [chatWith, setChatWith] = useState(null)
+  const [setup, setSetup] = useState(false)
   const [threads, setThreads] = useState({})
   const [toast, showToast] = useToast()
 
@@ -164,6 +166,19 @@ function TabletApp() {
     }
   }, [sync?.challenge, sync?.game])
 
+  // Signed out mid-flow, which is what a staff clear looks like from here. The
+  // next party must not find the last one's chat still open behind the button.
+  const signedIn = sync?.self?.signedIn
+  useEffect(() => {
+    if (signedIn === false) {
+      setView('home')
+      setChatWith(null)
+      setThreads({})
+      setWagerTarget(null)
+      setGiftTarget(null)
+    }
+  }, [signedIn])
+
   // Whatever the table was browsing, a game takes over — come back to the home
   // screen afterwards rather than mid-flow in a picker.
   useEffect(() => {
@@ -173,15 +188,12 @@ function TabletApp() {
     }
   }, [sync?.game])
 
-  const releaseTable = () => {
-    claimed.current = null
-    localStorage.removeItem(TABLE_KEY)
-    setSync(null)
+  const assignTable = (number) => {
+    socket.emit('table:claim', { tableNumber: number })
+    setSetup(false)
     setView('home')
     setChatWith(null)
     setThreads({})
-    socket.disconnect()
-    socket.connect()
   }
 
   const sendChallenge = ({ gameType, item }) => {
@@ -229,8 +241,14 @@ function TabletApp() {
   const social = sync.social ?? { notifications: [], muted: [], blocked: [], unread: {} }
 
   let screen
-  if (!sync.self) {
-    screen = <Setup taken={sync.taken} onClaim={(number) => socket.emit('table:claim', { tableNumber: number })} />
+  if (setup) {
+    screen = (
+      <Setup taken={sync.taken} onClaim={assignTable} onCancel={sync.self ? () => setSetup(false) : null} />
+    )
+  } else if (!sync.self || !sync.self.signedIn) {
+    screen = (
+      <Launch self={sync.self} onSignIn={() => socket.emit('table:signIn')} onSetup={() => setSetup(true)} />
+    )
   } else if (sync.lastResult) {
     screen = <Result result={sync.lastResult} onDone={() => socket.emit('result:dismiss')} />
   } else if (sync.game) {
@@ -262,7 +280,7 @@ function TabletApp() {
         sync={sync}
         mode={view}
         onPick={pickTable}
-        onReset={releaseTable}
+        onReset={() => setSetup(true)}
         onBack={() => setView('home')}
       />
     )
@@ -273,7 +291,7 @@ function TabletApp() {
         social={social}
         openCount={(sync.lobby ?? []).filter((t) => t.status === 'idle').length}
         onGo={setView}
-        onReset={releaseTable}
+        onReset={() => setSetup(true)}
         onOpenNotification={openNotification}
         onReadNotifications={() => socket.emit('notif:read')}
         onClearNotifications={() => socket.emit('notif:clear')}

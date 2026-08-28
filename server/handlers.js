@@ -32,8 +32,14 @@ export function init(server) {
 
 /* ---------------------------------------------------------------- sync --- */
 
-function isOnline(table) {
+// Bound: a tablet is holding this number, so nobody else may claim it.
+// Online: someone actually sat down and signed in, so the floor can reach them.
+function isBound(table) {
   return table.isBot || table.socketId !== null
+}
+
+function isOnline(table) {
+  return table.isBot || (table.socketId !== null && table.signedIn)
 }
 
 function recomputeStatus(table) {
@@ -88,7 +94,7 @@ function socialFor(table) {
 }
 
 function takenNumbers() {
-  return [...tables.values()].filter(isOnline).map((t) => t.number)
+  return [...tables.values()].filter(isBound).map((t) => t.number)
 }
 
 function buildSync(table) {
@@ -110,7 +116,7 @@ function buildSync(table) {
 
   return {
     ...base,
-    self: { number: table.number, status: table.status },
+    self: { number: table.number, status: table.status, signedIn: table.signedIn },
     lobby: lobbyFor(table.number),
     challenge: challenge
       ? {
@@ -343,7 +349,10 @@ function wipeTable(table) {
   table.unread = {}
   table.lastResult = null
   table.viewing = null
-  if (isOnline(table)) table.seatedAt = Date.now()
+  // Clearing a table is the party leaving, so the tablet drops back to its sign-in
+  // screen and the table goes dark until the next one sits down.
+  table.signedIn = false
+  table.seatedAt = null
   recomputeStatus(table)
 
   // The other end of every wiped thread is still holding its own copy, and its
@@ -608,11 +617,9 @@ function onConnection(socket) {
     const returning = table.socketId === socket.id
     table.socketId = socket.id
     socket.data.tableNumber = number
-    if (!returning) {
-      const first = table.seatedAt === null
-      if (first) table.seatedAt = Date.now()
-      log(table, { kind: first ? 'seated' : 'returned' })
-    }
+    // A party that was already signed in when the tablet dropped is coming back,
+    // not arriving. An empty tablet booting up is neither.
+    if (!returning && table.signedIn) log(table, { kind: 'returned' })
 
     // Reconnecting into a frozen game unfreezes it.
     const game = table.gameId ? games.get(table.gameId) : null
@@ -623,6 +630,19 @@ function onConnection(socket) {
 
     recomputeStatus(table)
     flushDeliveries(table)
+    syncAll()
+  })
+
+  socket.on('table:signIn', () => {
+    const number = socket.data.tableNumber
+    const table = number ? tables.get(number) : null
+    if (!table || table.socketId !== socket.id) return fail(socket, 'NO_TABLE', 'Claim a table first.')
+    if (table.signedIn) return
+
+    table.signedIn = true
+    table.seatedAt = Date.now()
+    log(table, { kind: 'seated' })
+    recomputeStatus(table)
     syncAll()
   })
 
@@ -959,7 +979,7 @@ function onConnection(socket) {
 
     table.socketId = null
     table.viewing = null
-    log(table, { kind: 'left' })
+    if (table.signedIn) log(table, { kind: 'left' })
 
     if (table.challengeId) cancelChallenge(challenges.get(table.challengeId), 'disconnected')
 

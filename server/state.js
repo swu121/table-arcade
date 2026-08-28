@@ -54,6 +54,9 @@ export function makeTable(number, isBot = false) {
     gameId: null,
     lastResult: null,
     isBot,
+    // The tablet knowing which table it is says nothing about anyone sitting at
+    // it. Until a party signs in, the table is dark to the rest of the floor.
+    signedIn: isBot,
     seatedAt: isBot ? Date.now() : null,
     // Everything this table did tonight, newest first, for the staff view.
     // Chat is deliberately absent: staff can see that tables talk, not what about.

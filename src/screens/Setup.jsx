@@ -3,7 +3,7 @@ import { Mark } from '../components/Logo.jsx'
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'clear', '0', 'back']
 
-export function Setup({ taken = [], onClaim }) {
+export function Setup({ taken = [], onClaim, onCancel }) {
   const [value, setValue] = useState('')
 
   const number = Number(value)
@@ -26,7 +26,7 @@ export function Setup({ taken = [], onClaim }) {
       </div>
 
       <div className="anim-fade-up panel w-full px-6 py-5 text-center" style={{ animationDelay: '80ms' }}>
-        <div className="overline">Which table are you?</div>
+        <div className="overline">Assign this tablet to a table</div>
         <div
           className={`display tnum mt-1 text-[clamp(4rem,18vw,6rem)] leading-none ${
             value ? 'gold-text' : 'text-edge'
@@ -53,18 +53,24 @@ export function Setup({ taken = [], onClaim }) {
         ))}
       </div>
 
-      <button
-        type="button"
-        className="btn btn-primary anim-fade-up h-14 w-full text-base"
-        style={{ animationDelay: '240ms' }}
-        disabled={!valid}
-        onClick={() => onClaim(number)}
-      >
-        Claim this table
-      </button>
+      <div className="anim-fade-up flex w-full gap-2.5" style={{ animationDelay: '240ms' }}>
+        {onCancel && (
+          <button type="button" className="btn btn-ghost h-14 flex-1 text-base" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
+        <button
+          type="button"
+          className="btn btn-primary h-14 flex-[2] text-base"
+          disabled={!valid}
+          onClick={() => onClaim(number)}
+        >
+          Assign this table
+        </button>
+      </div>
 
       <p className="text-center text-xs text-dim">
-        Set once per tablet. This device stays Table {value || '—'} until you change it.
+        Staff only. This device stays Table {value || '—'} until someone changes it.
       </p>
     </div>
   )

@@ -1,6 +1,7 @@
 import { Wordmark } from '../components/Logo.jsx'
 import { Inbox } from '../components/Inbox.jsx'
 import { pad } from '../lib/format.js'
+import { useHold } from '../lib/hold.js'
 
 function SwordsIcon({ size = 46 }) {
   return (
@@ -79,6 +80,7 @@ export function Home({
   onClearNotifications
 }) {
   const unreadMessages = Object.values(social.unread ?? {}).reduce((sum, n) => sum + n, 0)
+  const tableHold = useHold(onReset)
 
   return (
     <div className="relative z-10 flex h-full flex-col overflow-hidden">
@@ -87,9 +89,9 @@ export function Home({
         <div className="flex items-center gap-2.5">
           <button
             type="button"
-            onClick={onReset}
+            {...tableHold}
             className="panel flex items-center gap-3 px-4 py-2 text-left"
-            title="Change table number"
+            title="Hold to reassign this tablet"
           >
             <span className="overline leading-none">You are</span>
             <span className="display tnum text-2xl leading-none gold-text">{pad(self.number)}</span>
