@@ -34,12 +34,8 @@ function TicketRow({ ticket, onDeliver, index }) {
           </span>
           <span className="text-edge">·</span>
           <span>{money(ticket.item.price)}</span>
-          {ticket.gameName && (
-            <>
-              <span className="text-edge">·</span>
-              <span>{ticket.gameName}</span>
-            </>
-          )}
+          <span className="text-edge">·</span>
+          <span>{ticket.gameName ?? 'Gift'}</span>
         </div>
       </div>
 
@@ -88,13 +84,15 @@ export function Staff({ tickets, onDeliver, nav }) {
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-8">
         <h2 className="display text-[clamp(2rem,5.5vw,3rem)]">Open tickets</h2>
         <p className="mt-1.5 text-sm text-dim">
-          Ring the item to the charged table&apos;s tab, then run it to the winner.
+          Ring the item to the charged table&apos;s tab, then run it to the table it&apos;s owed to.
         </p>
 
         {open.length === 0 ? (
           <div className="panel anim-fade-up mt-5 grid place-items-center px-6 py-16 text-center">
             <div className="display text-3xl text-edge">All caught up</div>
-            <p className="mt-2 max-w-sm text-sm text-dim">Tickets land here the second a game is won.</p>
+            <p className="mt-2 max-w-sm text-sm text-dim">
+            Tickets land here the second a game is won or a table sends a gift.
+          </p>
           </div>
         ) : (
           <ul className="mt-5 flex flex-col gap-2.5">

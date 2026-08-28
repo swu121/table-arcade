@@ -2,10 +2,14 @@ import {
   MENU,
   CHALLENGE_TTL,
   RECONNECT_GRACE,
+  MAX_MESSAGE,
+  MAX_THREAD,
+  MAX_NOTIFICATIONS,
   tables,
   challenges,
   games,
   tickets,
+  getThread,
   nextId,
   makeTable,
   seedBots
@@ -69,6 +73,18 @@ function lobbyFor(me) {
     .map((t) => ({ number: t.number, status: t.status }))
 }
 
+// Only the counts and flags ride along on every sync. Message bodies travel
+// separately on chat:thread, so a busy room doesn't reship every conversation
+// to every tablet on each state change.
+function socialFor(table) {
+  return {
+    notifications: table.notifications,
+    muted: table.muted,
+    blocked: table.blocked,
+    unread: table.unread
+  }
+}
+
 function takenNumbers() {
   return [...tables.values()].filter(isOnline).map((t) => t.number)
 }
@@ -76,7 +92,15 @@ function takenNumbers() {
 function buildSync(table) {
   const base = { menu: MENU, games: gameMenu(), floorplan: getPlan(), taken: takenNumbers() }
   if (!table) {
-    return { ...base, self: null, lobby: lobbyFor(null), challenge: null, game: null, lastResult: null }
+    return {
+      ...base,
+      self: null,
+      lobby: lobbyFor(null),
+      challenge: null,
+      game: null,
+      lastResult: null,
+      social: { notifications: [], muted: [], blocked: [], unread: {} }
+    }
   }
 
   const challenge = table.challengeId ? challenges.get(table.challengeId) : null
@@ -98,7 +122,8 @@ function buildSync(table) {
         }
       : null,
     game: game ? gameView(game, table.number) : null,
-    lastResult: table.lastResult
+    lastResult: table.lastResult,
+    social: socialFor(table)
   }
 }
 
@@ -162,6 +187,72 @@ function cancelChallenge(challenge, reason) {
       })
     }
   }
+}
+
+/* --------------------------------------------------------------- social --- */
+
+function isBlocked(target, sender) {
+  return target.blocked.includes(sender)
+}
+
+function notify(table, entry) {
+  if (!table) return
+  table.notifications.unshift({ id: nextId('n'), at: Date.now(), read: false, ...entry })
+  if (table.notifications.length > MAX_NOTIFICATIONS) {
+    table.notifications.length = MAX_NOTIFICATIONS
+  }
+}
+
+// Emoji are several code units each, so measure and slice by code point —
+// a naive length cap would cut one in half and leave a replacement glyph.
+function cleanMessage(raw) {
+  if (typeof raw !== 'string') return null
+  const collapsed = raw.replace(/\s+/g, ' ').trim()
+  if (!collapsed) return null
+  const points = [...collapsed]
+  return points.length > MAX_MESSAGE ? points.slice(0, MAX_MESSAGE).join('') : collapsed
+}
+
+function pushThread(table, otherNumber) {
+  socketFor(table)?.emit('chat:thread', {
+    withTable: otherNumber,
+    messages: getThread(table.number, otherNumber).messages
+  })
+}
+
+function appendMessage(from, to, text) {
+  const thread = getThread(from, to)
+  thread.messages.push({ id: nextId('m'), from, to, text, at: Date.now() })
+  if (thread.messages.length > MAX_THREAD) {
+    thread.messages.splice(0, thread.messages.length - MAX_THREAD)
+  }
+}
+
+function markRead(table, otherNumber) {
+  let changed = Boolean(table.unread[otherNumber])
+  delete table.unread[otherNumber]
+  for (const entry of table.notifications) {
+    if (entry.kind === 'message' && entry.fromTable === otherNumber && !entry.read) {
+      entry.read = true
+      changed = true
+    }
+  }
+  return changed
+}
+
+function deliverMessage(from, target, body) {
+  appendMessage(from.number, target.number, body)
+
+  // Muting silences the alert but not the conversation: the message still lands
+  // in the thread, it just never badges the inbox or raises a toast.
+  if (!target.muted.includes(from.number)) {
+    target.unread[from.number] = (target.unread[from.number] ?? 0) + 1
+    notify(target, { kind: 'message', fromTable: from.number, preview: body })
+    socketFor(target)?.emit('chat:ping', { fromTable: from.number, preview: body })
+  }
+
+  pushThread(from, target.number)
+  pushThread(target, from.number)
 }
 
 /* ----------------------------------------------------------------- game --- */
@@ -301,6 +392,40 @@ function applyAction(tableNumber, gameId, payload) {
 
 /* ------------------------------------------------------------------ bots --- */
 
+const BOT_REPLIES = [
+  'Ha, you wish 😏',
+  'Say less — rack em up 🎯',
+  "We're two pitchers deep, be gentle 🍺",
+  'Bet 🔥',
+  'Winner buys the next round 🍻',
+  'Give us a sec, wings just landed 🍗',
+  '👀',
+  'Table champs over here 🏆'
+]
+
+const BOT_REPLY_MIN = 1200
+const BOT_REPLY_SPREAD = 1600
+
+function scheduleBotReply(botNumber, toNumber) {
+  setTimeout(() => {
+    const bot = tables.get(botNumber)
+    const target = tables.get(toNumber)
+    if (!bot?.isBot || !target || isBlocked(target, botNumber)) return
+    deliverMessage(bot, target, BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)])
+    syncAll()
+  }, BOT_REPLY_MIN + Math.random() * BOT_REPLY_SPREAD).unref()
+}
+
+function scheduleBotThanks(botNumber, toNumber, item) {
+  setTimeout(() => {
+    const bot = tables.get(botNumber)
+    const target = tables.get(toNumber)
+    if (!bot?.isBot || !target || isBlocked(target, botNumber)) return
+    deliverMessage(bot, target, `${item.name}?! You're a legend 🙏🍻`)
+    syncAll()
+  }, BOT_REPLY_MIN + Math.random() * BOT_REPLY_SPREAD).unref()
+}
+
 function scheduleBotAccept(challengeId) {
   setTimeout(() => {
     const challenge = challenges.get(challengeId)
@@ -391,6 +516,12 @@ function onConnection(socket) {
     if (target.number === from.number) {
       return fail(socket, 'SELF', "You can't challenge your own table.")
     }
+    if (isBlocked(target, from.number)) {
+      return fail(socket, 'BLOCKED', `Table ${target.number} isn't taking challenges right now.`)
+    }
+    if (isBlocked(from, target.number)) {
+      return fail(socket, 'BLOCKED', `Unblock Table ${target.number} to challenge them.`)
+    }
 
     const menuItem = MENU.find((m) => m.id === item)
     if (!menuItem) return fail(socket, 'BAD_ITEM', 'Pick something off the menu.')
@@ -440,6 +571,13 @@ function onConnection(socket) {
     }, CHALLENGE_TTL)
     challenge.timeoutHandle.unref?.()
 
+    notify(target, {
+      kind: 'challenge',
+      fromTable: challenge.from,
+      item: challenge.item,
+      gameName: mod.name
+    })
+
     socketFor(target)?.emit('challenge:incoming', {
       id: challenge.id,
       fromTable: challenge.from,
@@ -480,6 +618,131 @@ function onConnection(socket) {
     const challenge = table?.challengeId ? challenges.get(table.challengeId) : null
     if (!challenge || challenge.from !== table.number) return
     cancelChallenge(challenge, 'cancelled')
+    syncAll()
+  })
+
+  socket.on('gift:send', ({ toTable, item } = {}) => {
+    const from = currentTable(socket)
+    if (!from) return fail(socket, 'NO_TABLE', 'Claim a table first.')
+
+    const target = tables.get(Number(toTable))
+    if (!target || target.status === 'gone') {
+      return fail(socket, 'NO_TABLE', 'That table is not around right now.')
+    }
+    if (target.number === from.number) {
+      return fail(socket, 'SELF', "You can't send your own table a round.")
+    }
+    if (isBlocked(target, from.number)) {
+      return fail(socket, 'BLOCKED', `Table ${target.number} isn't taking anything right now.`)
+    }
+
+    const menuItem = MENU.find((m) => m.id === item)
+    if (!menuItem) return fail(socket, 'BAD_ITEM', 'Pick something off the menu.')
+
+    const ticket = {
+      id: nextId('tk'),
+      item: menuItem,
+      owingTable: from.number,
+      owedToTable: target.number,
+      status: 'pending',
+      createdAt: Date.now(),
+      gameId: null,
+      gameName: null,
+      reason: 'gift'
+    }
+    tickets.set(ticket.id, ticket)
+
+    notify(target, { kind: 'gift', fromTable: from.number, item: menuItem })
+    socketFor(target)?.emit('gift:incoming', { fromTable: from.number, item: menuItem })
+    socket.emit('gift:sent', { toTable: target.number, item: menuItem })
+
+    if (target.isBot) scheduleBotThanks(target.number, from.number, menuItem)
+
+    syncStaff()
+    syncAll()
+  })
+
+  socket.on('chat:send', ({ toTable, text } = {}) => {
+    const from = currentTable(socket)
+    if (!from) return fail(socket, 'NO_TABLE', 'Claim a table first.')
+
+    const target = tables.get(Number(toTable))
+    if (!target || target.status === 'gone') {
+      return fail(socket, 'NO_TABLE', 'That table is not around right now.')
+    }
+    if (target.number === from.number) {
+      return fail(socket, 'SELF', "You can't message your own table.")
+    }
+    if (isBlocked(target, from.number)) {
+      return fail(socket, 'BLOCKED', `Table ${target.number} isn't taking messages right now.`)
+    }
+    if (isBlocked(from, target.number)) {
+      return fail(socket, 'BLOCKED', `Unblock Table ${target.number} to message them.`)
+    }
+
+    const body = cleanMessage(text)
+    if (!body) return fail(socket, 'EMPTY', 'Type something first.')
+
+    deliverMessage(from, target, body)
+    if (target.isBot) scheduleBotReply(target.number, from.number)
+    syncAll()
+  })
+
+  socket.on('chat:open', ({ withTable } = {}) => {
+    const table = currentTable(socket)
+    if (!table) return
+    const other = Number(withTable)
+    if (!Number.isInteger(other)) return
+
+    pushThread(table, other)
+    if (markRead(table, other)) syncAll()
+  })
+
+  socket.on('chat:mute', ({ table: otherTable, muted } = {}) => {
+    const table = currentTable(socket)
+    if (!table) return
+    const other = Number(otherTable)
+    if (!Number.isInteger(other) || other === table.number) return
+
+    table.muted = table.muted.filter((n) => n !== other)
+    if (muted) table.muted.push(other)
+    syncAll()
+  })
+
+  socket.on('chat:block', ({ table: otherTable, blocked } = {}) => {
+    const table = currentTable(socket)
+    if (!table) return
+    const other = Number(otherTable)
+    if (!Number.isInteger(other) || other === table.number) return
+
+    table.blocked = table.blocked.filter((n) => n !== other)
+    if (blocked) {
+      table.blocked.push(other)
+      // Drop anything they already sent, otherwise blocking leaves their
+      // unread badge and notifications sitting there.
+      delete table.unread[other]
+      table.notifications = table.notifications.filter((n) => n.fromTable !== other)
+
+      // A pending challenge from someone you just blocked has to go too.
+      const challenge = table.challengeId ? challenges.get(table.challengeId) : null
+      if (challenge && (challenge.from === other || challenge.to === other)) {
+        cancelChallenge(challenge, 'declined')
+      }
+    }
+    syncAll()
+  })
+
+  socket.on('notif:read', () => {
+    const table = currentTable(socket)
+    if (!table) return
+    for (const entry of table.notifications) entry.read = true
+    syncAll()
+  })
+
+  socket.on('notif:clear', () => {
+    const table = currentTable(socket)
+    if (!table) return
+    table.notifications = []
     syncAll()
   })
 

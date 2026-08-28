@@ -17,15 +17,16 @@ const STATUS = {
   challenged: { label: 'Deciding', chip: 'chip-wait' }
 }
 
-export function TableCard({ table, onChallenge, index = 0 }) {
+export function TableCard({ table, onChallenge, index = 0, enabled }) {
   const open = table.status === 'idle'
   const meta = STATUS[table.status] ?? STATUS.playing
+  const pickable = enabled ?? open
 
   return (
     <button
       type="button"
       data-open={open}
-      disabled={!open}
+      disabled={!pickable}
       onClick={onChallenge}
       style={{ animationDelay: `${index * 45}ms` }}
       className="table-card flex flex-col items-start gap-2 p-4 text-left disabled:cursor-not-allowed"

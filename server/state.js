@@ -14,10 +14,30 @@ export const RECONNECT_GRACE = 60_000
 // Spread across the default floor plan's three zones so the demo floor reads as busy.
 export const BOT_TABLES = [12, 17, 20]
 
+// Counted in code points, not UTF-16 units, so a cap can never split an emoji.
+export const MAX_MESSAGE = 280
+export const MAX_THREAD = 200
+export const MAX_NOTIFICATIONS = 40
+
 export const tables = new Map()
 export const challenges = new Map()
 export const games = new Map()
 export const tickets = new Map()
+export const conversations = new Map()
+
+// One thread per unordered pair, so table 4 and table 12 share `4-12` whichever
+// of them opens the chat first.
+const threadKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`)
+
+export function getThread(a, b) {
+  const key = threadKey(a, b)
+  let thread = conversations.get(key)
+  if (!thread) {
+    thread = { key, messages: [] }
+    conversations.set(key, thread)
+  }
+  return thread
+}
 
 let seq = 0
 export const nextId = (prefix) => `${prefix}_${(++seq).toString(36)}${Date.now().toString(36)}`
@@ -30,7 +50,13 @@ export function makeTable(number, isBot = false) {
     challengeId: null,
     gameId: null,
     lastResult: null,
-    isBot
+    isBot,
+    notifications: [],
+    // Muted: their messages still land in the thread, they just stop alerting.
+    // Blocked: they cannot reach this table by message, gift or challenge.
+    muted: [],
+    blocked: [],
+    unread: {}
   }
 }
 

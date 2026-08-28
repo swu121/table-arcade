@@ -4,8 +4,11 @@ import { useWakeLock } from './useWakeLock.js'
 import { Backdrop, OfflineBanner, Toast } from './components/Bits.jsx'
 import { Mark, Wordmark } from './components/Logo.jsx'
 import { Setup } from './screens/Setup.jsx'
+import { Home } from './screens/Home.jsx'
 import { Lobby } from './screens/Lobby.jsx'
+import { Chat } from './screens/Chat.jsx'
 import { WagerSheet } from './screens/WagerSheet.jsx'
+import { GiftSheet } from './screens/GiftSheet.jsx'
 import { IncomingChallenge, WaitingForAnswer } from './screens/Challenge.jsx'
 import { Game } from './screens/Game.jsx'
 import { Result } from './screens/Result.jsx'
@@ -57,8 +60,16 @@ function useToast() {
 function TabletApp() {
   const [sync, setSync] = useState(null)
   const [connected, setConnected] = useState(socket.connected)
+  const [view, setView] = useState('home')
   const [wagerTarget, setWagerTarget] = useState(null)
+  const [giftTarget, setGiftTarget] = useState(null)
+  const [chatWith, setChatWith] = useState(null)
+  const [threads, setThreads] = useState({})
   const [toast, showToast] = useToast()
+
+  // Read inside socket listeners that are registered once, so it has to be a ref.
+  const openChat = useRef(null)
+  openChat.current = chatWith
 
   // Only tables the server actually confirmed get re-claimed on reconnect.
   const claimed = useRef(null)
@@ -89,11 +100,32 @@ function TabletApp() {
       if (line) showToast(line(otherTable))
     }
 
+    const onThread = ({ withTable, messages }) => {
+      setThreads((current) => ({ ...current, [withTable]: messages }))
+    }
+
+    const onChatPing = ({ fromTable, preview }) => {
+      if (openChat.current === fromTable) return
+      showToast(`Table ${fromTable}: ${preview}`, 'good')
+    }
+
+    const onGiftIncoming = ({ fromTable, item }) => {
+      showToast(`Table ${fromTable} sent you a ${item.name} — it's on them.`, 'good')
+    }
+
+    const onGiftSent = ({ toTable, item }) => {
+      showToast(`${item.name} on its way to Table ${toTable}.`, 'good')
+    }
+
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
     socket.on('state:sync', setSync)
     socket.on('app:error', onError)
     socket.on('challenge:ended', onChallengeEnded)
+    socket.on('chat:thread', onThread)
+    socket.on('chat:ping', onChatPing)
+    socket.on('gift:incoming', onGiftIncoming)
+    socket.on('gift:sent', onGiftSent)
 
     if (socket.connected) onConnect()
 
@@ -103,6 +135,10 @@ function TabletApp() {
       socket.off('state:sync', setSync)
       socket.off('app:error', onError)
       socket.off('challenge:ended', onChallengeEnded)
+      socket.off('chat:thread', onThread)
+      socket.off('chat:ping', onChatPing)
+      socket.off('gift:incoming', onGiftIncoming)
+      socket.off('gift:sent', onGiftSent)
     }
   }, [showToast])
 
@@ -115,13 +151,28 @@ function TabletApp() {
 
   // A challenge landing means the sheet's target is stale either way.
   useEffect(() => {
-    if (sync?.challenge || sync?.game) setWagerTarget(null)
+    if (sync?.challenge || sync?.game) {
+      setWagerTarget(null)
+      setGiftTarget(null)
+    }
   }, [sync?.challenge, sync?.game])
+
+  // Whatever the table was browsing, a game takes over — come back to the home
+  // screen afterwards rather than mid-flow in a picker.
+  useEffect(() => {
+    if (sync?.game) {
+      setView('home')
+      setChatWith(null)
+    }
+  }, [sync?.game])
 
   const releaseTable = () => {
     claimed.current = null
     localStorage.removeItem(TABLE_KEY)
     setSync(null)
+    setView('home')
+    setChatWith(null)
+    setThreads({})
     socket.disconnect()
     socket.connect()
   }
@@ -129,6 +180,35 @@ function TabletApp() {
   const sendChallenge = ({ gameType, item }) => {
     socket.emit('challenge:send', { toTable: wagerTarget.number, gameType, item })
     setWagerTarget(null)
+    setView('home')
+  }
+
+  const sendGift = ({ item }) => {
+    socket.emit('gift:send', { toTable: giftTarget.number, item })
+    setGiftTarget(null)
+    setView('home')
+  }
+
+  const openChatWith = (number) => {
+    setChatWith(number)
+    socket.emit('chat:open', { withTable: number })
+  }
+
+  const pickTable = (table) => {
+    if (view === 'gift') setGiftTarget(table)
+    else if (view === 'message') openChatWith(table.number)
+    else setWagerTarget(table)
+  }
+
+  const openNotification = (entry) => {
+    if (entry.kind === 'message') {
+      setView('message')
+      openChatWith(entry.fromTable)
+    } else if (entry.kind === 'gift') {
+      setGiftTarget({ number: entry.fromTable })
+    } else if (entry.kind === 'challenge') {
+      setWagerTarget({ number: entry.fromTable })
+    }
   }
 
   if (!sync) {
@@ -138,6 +218,8 @@ function TabletApp() {
       </Shell>
     )
   }
+
+  const social = sync.social ?? { notifications: [], muted: [], blocked: [], unread: {} }
 
   let screen
   if (!sync.self) {
@@ -152,8 +234,43 @@ function TabletApp() {
         onClaimWin={() => socket.emit('game:claimWin', { gameId: sync.game.id })}
       />
     )
+  } else if (chatWith !== null) {
+    screen = (
+      <Chat
+        self={sync.self}
+        withTable={chatWith}
+        messages={threads[chatWith] ?? []}
+        muted={social.muted.includes(chatWith)}
+        blocked={social.blocked.includes(chatWith)}
+        onBack={() => setChatWith(null)}
+        onSend={(text) => socket.emit('chat:send', { toTable: chatWith, text })}
+        onMute={() => socket.emit('chat:mute', { table: chatWith, muted: !social.muted.includes(chatWith) })}
+        onBlock={() => socket.emit('chat:block', { table: chatWith, blocked: !social.blocked.includes(chatWith) })}
+      />
+    )
+  } else if (view !== 'home') {
+    screen = (
+      <Lobby
+        sync={sync}
+        mode={view}
+        onPick={pickTable}
+        onReset={releaseTable}
+        onBack={() => setView('home')}
+      />
+    )
   } else {
-    screen = <Lobby sync={sync} onPick={setWagerTarget} onReset={releaseTable} />
+    screen = (
+      <Home
+        self={sync.self}
+        social={social}
+        openCount={(sync.lobby ?? []).filter((t) => t.status === 'idle').length}
+        onGo={setView}
+        onReset={releaseTable}
+        onOpenNotification={openNotification}
+        onReadNotifications={() => socket.emit('notif:read')}
+        onClearNotifications={() => socket.emit('notif:clear')}
+      />
+    )
   }
 
   const challenge = sync.challenge
@@ -169,6 +286,15 @@ function TabletApp() {
           games={sync.games}
           onCancel={() => setWagerTarget(null)}
           onSend={sendChallenge}
+        />
+      )}
+
+      {giftTarget && (
+        <GiftSheet
+          target={giftTarget}
+          menu={sync.menu}
+          onCancel={() => setGiftTarget(null)}
+          onSend={sendGift}
         />
       )}
 
