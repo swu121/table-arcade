@@ -112,7 +112,6 @@ function Table({
   isSelf,
   pickable,
   selected,
-  mergeTarget,
   unread,
   draggable,
   showSeats,
@@ -147,7 +146,6 @@ function Table({
       className="fp-item fp-table"
       data-status={status}
       data-self={isSelf || undefined}
-      data-merge={mergeTarget || undefined}
       data-active={interactive || undefined}
       data-drag={draggable || undefined}
       onClick={onTap && pickable ? () => onTap(table) : undefined}
@@ -293,7 +291,6 @@ export function FloorPlan({
   selectable = null,
   selectedTable = null,
   selectedFixture = null,
-  mergeTarget = null,
   unread = null,
   onTableTap = null,
   onFixtureTap = null,
@@ -376,7 +373,6 @@ export function FloorPlan({
               isSelf={selfNumber != null && table.number === selfNumber}
               pickable={pickable}
               selected={selectedTable === table.number}
-              mergeTarget={mergeTarget === table.number}
               unread={unread?.[table.number] ?? 0}
               draggable={draggable}
               showSeats={showSeats}

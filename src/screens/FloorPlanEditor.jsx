@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { socket } from '../socket.js'
 import { FloorPlan } from '../components/FloorPlan.jsx'
 import { TableInsight } from '../components/TableInsight.jsx'
+import { ClearTableDialog } from '../components/ClearTableDialog.jsx'
 
 const GRID = 10
 const KINDS = [
@@ -44,23 +45,6 @@ function freeSpot(plan, w, h) {
   return { x: 40, y: 40 }
 }
 
-// A rectangular table dropped on top of another one joins it. Only worth
-// offering once they genuinely overlap, or a near-miss would eat a table.
-function mergeCandidate(tables, dragged, box) {
-  if (dragged.shape !== 'rect') return null
-  let best = null
-  for (const other of tables) {
-    if (other.number === dragged.number || other.shape !== 'rect') continue
-    const overlapW = Math.min(box.x + box.w, other.x + other.w) - Math.max(box.x, other.x)
-    const overlapH = Math.min(box.y + box.h, other.y + other.h) - Math.max(box.y, other.y)
-    if (overlapW <= 0 || overlapH <= 0) continue
-    const area = overlapW * overlapH
-    if (area < 0.34 * Math.min(box.w * box.h, other.w * other.h)) continue
-    if (!best || area > best.area) best = { number: other.number, area }
-  }
-  return best?.number ?? null
-}
-
 function Section({ title, children }) {
   return (
     <div className="panel p-3">
@@ -87,7 +71,6 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
   const [error, setError] = useState('')
   const [confirmReset, setConfirmReset] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
-  const [mergeTarget, setMergeTarget] = useState(null)
   const [dragMode, setDragMode] = useState(null)
 
   const svgRef = useRef(null)
@@ -246,15 +229,6 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
     const targetY = clamp(snap(rawY), 0, plan.height - state.h)
     if (targetX !== state.startX || targetY !== state.startY) state.moved = true
 
-    if (state.type === 'table') {
-      const dragged = plan.tables.find((t) => t.number === state.key)
-      const next = dragged
-        ? mergeCandidate(plan.tables, dragged, { x: targetX, y: targetY, w: state.w, h: state.h })
-        : null
-      state.merge = next
-      setMergeTarget(next)
-    }
-
     setPlan((current) => {
       let changed = false
       const move = (item) => {
@@ -278,56 +252,11 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
     const state = drag.current
     if (!state) return
     drag.current = null
-    setMergeTarget(null)
     setDragMode(null)
     if (state.capture?.hasPointerCapture?.(state.pointerId)) {
       state.capture.releasePointerCapture(state.pointerId)
     }
     if (state.moved) setDirty(true)
-    if (state.mode === 'move' && state.type === 'table' && state.merge != null) {
-      mergeTables(state.key, state.merge)
-    }
-  }
-
-  // The survivor keeps the number of the table that was already sitting there,
-  // grows along whichever axis the two were separated on, and inherits the
-  // seats of both.
-  const mergeTables = (draggedNumber, targetNumber) => {
-    edit((current) => {
-      const moved = current.tables.find((t) => t.number === draggedNumber)
-      const target = current.tables.find((t) => t.number === targetNumber)
-      if (!moved || !target) return current
-
-      const horizontal =
-        Math.abs(moved.x + moved.w / 2 - (target.x + target.w / 2)) >=
-        Math.abs(moved.y + moved.h / 2 - (target.y + target.h / 2))
-
-      const after = horizontal
-        ? moved.x + moved.w / 2 >= target.x + target.w / 2
-        : moved.y + moved.h / 2 >= target.y + target.h / 2
-
-      const w = clamp(horizontal ? moved.w + target.w : Math.max(moved.w, target.w), 40, 300)
-      const h = clamp(horizontal ? Math.max(moved.h, target.h) : moved.h + target.h, 40, 300)
-      const x = horizontal && !after ? target.x + target.w - w : target.x
-      const y = !horizontal && !after ? target.y + target.h - h : target.y
-
-      const merged = {
-        ...target,
-        x: clamp(snap(x), 0, current.width - w),
-        y: clamp(snap(y), 0, current.height - h),
-        w,
-        h,
-        seats: clamp(moved.seats + target.seats, 1, 20)
-      }
-
-      return {
-        ...current,
-        tables: current.tables
-          .filter((t) => t.number !== draggedNumber)
-          .map((t) => (t.number === targetNumber ? merged : t))
-      }
-    })
-    setSelection({ type: 'table', key: targetNumber })
   }
 
   /* --------------------------------------------------------------- edits */
@@ -409,23 +338,6 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
       shape,
       w: clamp(shape === 'rect' ? Math.round(h * 1.35) : h, 40, 300)
     })
-  }
-
-  const resize = (item, type, axis, delta) => {
-    const table = type === 'table'
-    const min = table ? 40 : 20
-    const max = table ? 300 : axis === 'w' ? plan.width : plan.height
-    // A round table keeps w === h, so it has to fit inside whichever edge is nearer.
-    const room =
-      table && item.shape !== 'rect'
-        ? Math.min(plan.width - item.x, plan.height - item.y)
-        : axis === 'w'
-          ? plan.width - item.x
-          : plan.height - item.y
-
-    const value = Math.min(clamp((item[axis] ?? 0) + delta, min, max), room)
-    if (!table) return patchFixture(item.id, { [axis]: value })
-    patchTable(item.number, item.shape === 'rect' ? { [axis]: value } : { w: value, h: value })
   }
 
   /* ------------------------------------------------------------ transport */
@@ -518,7 +430,6 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
             draggable
             selectedTable={selectedTable ? selectedTable.number : null}
             selectedFixture={selectedFixture ? selectedFixture.id : null}
-            mergeTarget={mergeTarget}
             dragMode={dragMode}
             onHandlePointerDown={beginResize}
             onTablePointerDown={(event, table) => beginDrag(event, 'table', table)}
@@ -549,7 +460,7 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
             <Section title="Nothing selected">
               <p className="text-xs leading-relaxed text-dim">
                 Drag a table or fixture to move it. Everything snaps to a {GRID}-unit grid. Tap one to rename, resize or
-                delete it. Drop a rectangular table onto another to join them into one.
+                delete it.
               </p>
             </Section>
           )}
@@ -609,55 +520,13 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
                 </span>
               </Field>
 
-              <Field label="Size">
-                <span className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-ghost h-9 w-9 text-base"
-                    onClick={() => resize(selectedTable, 'table', 'w', -GRID)}
-                  >
-                    −
-                  </button>
-                  <span className="tnum w-14 text-center text-xs text-dim">
-                    {selectedTable.w}×{selectedTable.h}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-ghost h-9 w-9 text-base"
-                    onClick={() => resize(selectedTable, 'table', 'w', GRID)}
-                  >
-                    +
-                  </button>
-                </span>
-              </Field>
-
-              {confirmClear ? (
-                <div className="mt-2 flex flex-col gap-2">
-                  <p className="text-xs leading-relaxed text-dim">
-                    Wipe this table&apos;s messages, tickets and activity? The seat stays on the plan.
-                  </p>
-                  <span className="flex gap-2">
-                    <button
-                      type="button"
-                      className="btn btn-ghost h-11 flex-1 text-xs"
-                      onClick={() => setConfirmClear(false)}
-                    >
-                      Keep it
-                    </button>
-                    <button type="button" className="btn btn-danger h-11 flex-1 text-xs" onClick={wipeTable}>
-                      Clear it
-                    </button>
-                  </span>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-ghost mt-2 h-11 w-full text-xs"
-                  onClick={() => setConfirmClear(true)}
-                >
-                  Clear table
-                </button>
-              )}
+              <button
+                type="button"
+                className="btn btn-ghost mt-2 h-11 w-full text-xs"
+                onClick={() => setConfirmClear(true)}
+              >
+                Clear table
+              </button>
             </Section>
           )}
 
@@ -686,46 +555,6 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
                 />
               </Field>
 
-              <Field label="Width">
-                <span className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-ghost h-9 w-9 text-base"
-                    onClick={() => resize(selectedFixture, 'fixture', 'w', -GRID)}
-                  >
-                    −
-                  </button>
-                  <span className="tnum w-10 text-center text-xs text-dim">{selectedFixture.w}</span>
-                  <button
-                    type="button"
-                    className="btn btn-ghost h-9 w-9 text-base"
-                    onClick={() => resize(selectedFixture, 'fixture', 'w', GRID)}
-                  >
-                    +
-                  </button>
-                </span>
-              </Field>
-
-              <Field label="Height">
-                <span className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-ghost h-9 w-9 text-base"
-                    onClick={() => resize(selectedFixture, 'fixture', 'h', -GRID)}
-                  >
-                    −
-                  </button>
-                  <span className="tnum w-10 text-center text-xs text-dim">{selectedFixture.h}</span>
-                  <button
-                    type="button"
-                    className="btn btn-ghost h-9 w-9 text-base"
-                    onClick={() => resize(selectedFixture, 'fixture', 'h', GRID)}
-                  >
-                    +
-                  </button>
-                </span>
-              </Field>
-
               <button type="button" className="btn btn-danger mt-2 h-11 w-full text-xs" onClick={deleteSelected}>
                 Delete fixture
               </button>
@@ -733,6 +562,16 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
           )}
         </aside>
       </div>
+
+      {confirmClear && selectedTable && (
+        <ClearTableDialog
+          number={selectedTable.number}
+          info={floor.find((t) => t.number === selectedTable.number) ?? null}
+          tickets={tickets}
+          onCancel={() => setConfirmClear(false)}
+          onConfirm={wipeTable}
+        />
+      )}
     </div>
   )
 }

@@ -42,7 +42,7 @@ const TONE = {
   left: 'text-dim'
 }
 
-function Row({ entry }) {
+export function ActivityRow({ entry }) {
   return (
     <li className="flex items-start gap-2 py-1.5">
       <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-edge" />
@@ -121,7 +121,7 @@ export function TableInsight({ number, info, tickets }) {
         ) : (
           <ul className="divide-y divide-edge/40">
             {history.map((entry) => (
-              <Row key={entry.id} entry={entry} />
+              <ActivityRow key={entry.id} entry={entry} />
             ))}
           </ul>
         )}

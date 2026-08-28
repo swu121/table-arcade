@@ -195,16 +195,6 @@
   fill: rgba(255, 182, 39, 0.85);
 }
 
-/* The table you are about to drop onto. */
-.fp-table[data-merge='true'] .fp-shape {
-  fill: rgba(22, 224, 189, 0.2);
-  stroke: var(--color-mint);
-  stroke-width: 4;
-}
-.fp-table[data-merge='true'] .fp-chair {
-  fill: rgba(22, 224, 189, 0.7);
-}
-
 .fp-halo {
   fill: none;
   stroke: var(--color-gold);
