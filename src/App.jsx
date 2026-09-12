@@ -197,22 +197,25 @@ function TabletApp() {
     setThreads({})
   }
 
+  const openChatWith = (number) => {
+    setChatWith(number)
+    socket.emit('chat:open', { withTable: number })
+  }
+
   const sendChallenge = ({ gameType, item }) => {
-    socket.emit('challenge:send', { toTable: wagerTarget.number, gameType, item })
+    const toTable = wagerTarget.number
+    socket.emit('challenge:send', { toTable, gameType, item })
     setWagerTarget(null)
-    // Sent from inside a thread, the thread stays up and shows the challenge land.
-    if (chatWith === null) setView('home')
+    // The challenge is what opens the thread, so land in it: the waiting sheet
+    // sits on top until the other table answers, and the game takes over from
+    // there. Sent from inside the thread already, this is a no-op.
+    if (chatWith !== toTable) openChatWith(toTable)
   }
 
   const sendGift = ({ item }) => {
     socket.emit('gift:send', { toTable: giftTarget.number, item })
     setGiftTarget(null)
     setView('home')
-  }
-
-  const openChatWith = (number) => {
-    setChatWith(number)
-    socket.emit('chat:open', { withTable: number })
   }
 
   // The floor plan hands back the drawn table, which knows nothing about the

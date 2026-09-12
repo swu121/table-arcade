@@ -72,7 +72,8 @@ Tables with unread messages carry a count badge.
 Tapping a table in challenge mode does one of two things:
 
 - A table you have never dealt with opens the challenge sheet below. Sending the challenge
-  also opens a thread between the two tables, with the challenge noted in it.
+  creates a thread between the two tables and drops you straight into it, with the challenge
+  noted in it and the waiting sheet on top until they answer.
 - A table you already share a thread with opens that thread instead. There is a **Challenge**
   button in the thread header for the rematch; it is greyed out with a reason if either side
   is busy or the table is blocked.
