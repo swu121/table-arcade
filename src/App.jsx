@@ -200,7 +200,8 @@ function TabletApp() {
   const sendChallenge = ({ gameType, item }) => {
     socket.emit('challenge:send', { toTable: wagerTarget.number, gameType, item })
     setWagerTarget(null)
-    setView('home')
+    // Sent from inside a thread, the thread stays up and shows the challenge land.
+    if (chatWith === null) setView('home')
   }
 
   const sendGift = ({ item }) => {
@@ -214,15 +215,18 @@ function TabletApp() {
     socket.emit('chat:open', { withTable: number })
   }
 
+  // The floor plan hands back the drawn table, which knows nothing about the
+  // room; the lobby entry is where `known` lives.
+  const isKnown = (number) => Boolean((sync?.lobby ?? []).find((t) => t.number === number)?.known)
+
   const pickTable = (table) => {
     if (view === 'gift') setGiftTarget(table)
-    else if (view === 'message') openChatWith(table.number)
+    else if (isKnown(table.number)) openChatWith(table.number)
     else setWagerTarget(table)
   }
 
   const openNotification = (entry) => {
     if (entry.kind === 'message') {
-      setView('message')
       openChatWith(entry.fromTable)
     } else if (entry.kind === 'gift') {
       setGiftTarget({ number: entry.fromTable })
@@ -268,9 +272,11 @@ function TabletApp() {
         withTable={chatWith}
         messages={threads[chatWith]?.messages ?? []}
         readAt={threads[chatWith]?.readAt ?? 0}
+        other={(sync.lobby ?? []).find((t) => t.number === chatWith) ?? null}
         muted={social.muted.includes(chatWith)}
         blocked={social.blocked.includes(chatWith)}
         onBack={() => setChatWith(null)}
+        onChallenge={() => setWagerTarget({ number: chatWith })}
         onSend={(text) => socket.emit('chat:send', { toTable: chatWith, text })}
         onMute={() => socket.emit('chat:mute', { table: chatWith, muted: !social.muted.includes(chatWith) })}
         onBlock={() => socket.emit('chat:block', { table: chatWith, blocked: !social.blocked.includes(chatWith) })}

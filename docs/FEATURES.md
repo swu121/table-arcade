@@ -31,8 +31,9 @@ or reach the table. That is what stops an empty table from being challenged.
 
 ![The home screen](screenshots/home.png)
 
-Three things to do — **Challenge**, **Gift**, **Message** — plus a live count of how many
-tables are open right now. The header carries the table number (hold it to reassign) and an
+Two things to do — **Challenge** and **Gift** — plus a live count of how many tables are open
+right now. Unread messages badge the Challenge tile, because conversations live on the same
+floor plan as challenges. The header carries the table number (hold it to reassign) and an
 inbox bell with an unread badge.
 
 **Inbox.** Challenges, gifts and messages collect in a dropdown with sender, preview and a
@@ -63,10 +64,18 @@ Your own table wears a gold halo. Every other table carries a status:
 | **Deciding** | Has a challenge pending either way |
 | Offline | Tablet disconnected; can still be messaged for when they return |
 
-The same plan backs all three modes, filtered to suit: **Challenge** shows only tables you can
-actually play, **Gift** shows everyone on the floor, and **Message** shows everyone including
-tables you have blocked, so you can still open the thread and unblock them. In message mode
-tables carry an unread-count badge.
+The same plan backs both modes, filtered to suit. **Gift** shows everyone on the floor.
+**Challenge** shows open tables you could play plus every table you already share a thread
+with — including ones you have blocked, so you can still find the thread and unblock them.
+Tables with unread messages carry a count badge.
+
+Tapping a table in challenge mode does one of two things:
+
+- A table you have never dealt with opens the challenge sheet below. Sending the challenge
+  also opens a thread between the two tables, with the challenge noted in it.
+- A table you already share a thread with opens that thread instead. There is a **Challenge**
+  button in the thread header for the rematch; it is greyed out with a reason if either side
+  is busy or the table is blocked.
 
 ## Sending a challenge
 
@@ -168,8 +177,10 @@ they just get told a round is on its way, and a ticket appears for staff.
 
 ![A thread between two tables](screenshots/chat.png)
 
-One thread per pair of tables, whichever side opens it first. Free text up to 280 characters,
-with an emoji picker organised into six tabs. Threads keep their last 200 messages.
+One thread per pair of tables, started by the first challenge between them and reopened from
+the floor plan after that. Challenges sent from inside the thread leave a note in it. Free text
+up to 280 characters, with an emoji picker organised into six tabs. Threads keep their last
+200 messages.
 
 Senders can see whether a message landed:
 
@@ -182,8 +193,8 @@ already have the thread open it is marked read and stays quiet.
 
 **Mute** silences the alerts from a table but keeps the conversation. **Block** cuts them off
 entirely — no messages, no gifts, no challenges — clears what they already sent, and declines
-any challenge of theirs still standing. Blocked tables stay visible in message mode so you can
-find the thread and undo it.
+any challenge of theirs still standing. Blocked tables stay tappable on the challenge floor so
+you can find the thread and undo it.
 
 ## Bots
 

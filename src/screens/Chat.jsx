@@ -21,7 +21,40 @@ function receiptFor(message, readAt) {
   return message.deliveredAt ? 'Delivered' : 'Sent'
 }
 
-export function Chat({ self, withTable, messages, readAt, muted, blocked, onBack, onSend, onMute, onBlock }) {
+function SwordsIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+      <path d="M6 6h7l22 22-7 7L6 13V6Z" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
+      <path d="M42 6h-7L13 28l7 7L42 13V6Z" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
+      <path d="M30 34l8 8M18 34l-8 8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+// Why the challenge button is off, in the words a guest would use.
+function challengeBlocker({ self, other, blocked }) {
+  if (blocked) return 'Unblock them first'
+  if (!other) return "They're not on the floor"
+  if (self.status !== 'idle') return "You're busy"
+  if (other.status === 'playing') return "They're in a game"
+  if (other.status !== 'idle') return "They're deciding"
+  return null
+}
+
+export function Chat({
+  self,
+  withTable,
+  other,
+  messages,
+  readAt,
+  muted,
+  blocked,
+  onBack,
+  onChallenge,
+  onSend,
+  onMute,
+  onBlock
+}) {
   const [draft, setDraft] = useState('')
   const [picker, setPicker] = useState(false)
   const list = useRef(null)
@@ -33,6 +66,7 @@ export function Chat({ self, withTable, messages, readAt, muted, blocked, onBack
   }, [messages])
 
   const lastMine = messages.findLastIndex((message) => message.from === self.number)
+  const blocker = challengeBlocker({ self, other, blocked })
 
   const send = () => {
     const body = draft.trim()
@@ -64,6 +98,16 @@ export function Chat({ self, withTable, messages, readAt, muted, blocked, onBack
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={onChallenge}
+            disabled={Boolean(blocker)}
+            title={blocker ?? `Challenge Table ${pad(withTable)}`}
+            className="btn btn-primary h-11 gap-2 px-4 text-sm"
+          >
+            <SwordsIcon />
+            {blocker ?? 'Challenge'}
+          </button>
           <button
             type="button"
             onClick={onMute}
@@ -102,6 +146,14 @@ export function Chat({ self, withTable, messages, readAt, muted, blocked, onBack
           </div>
         ) : (
           messages.map((message, i) => {
+            if (message.system) {
+              return (
+                <div key={message.id} className="chat-system">
+                  <span>{message.text}</span>
+                  <span className="chat-system-time">{stamp(message.at)}</span>
+                </div>
+              )
+            }
             const mine = message.from === self.number
             return (
               <div key={message.id} className={`chat-bubble ${mine ? 'chat-bubble--mine' : ''}`}>

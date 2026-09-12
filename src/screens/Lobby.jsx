@@ -14,21 +14,17 @@ const LEGEND = [
 const MODES = {
   challenge: {
     title: 'Challenge a table',
-    blurb: "Tap an open table, pick what you're playing for. Loser's tab covers it.",
-    // A challenge needs both tables free; a gift or a message doesn't.
-    pick: ({ status, blocked }) => status === 'idle' && !blocked
+    blurb: "Tap an open table and pick what you're playing for. Tables you've played before open the conversation.",
+    // A fresh challenge needs the other table free. A table you already share a
+    // thread with is always tappable — the tap opens the thread, not a challenge —
+    // and that includes blocked tables, since the thread is the only place to
+    // unblock them.
+    pick: ({ status, blocked, known }) => known || (status === 'idle' && !blocked)
   },
   gift: {
     title: 'Send a table something',
     blurb: 'Tap any table on the floor. It goes to the bar and onto your tab.',
     pick: ({ blocked }) => !blocked
-  },
-  message: {
-    title: 'Message a table',
-    // Blocked tables stay tappable here on purpose — the thread is the only
-    // place to unblock them, so filtering them out would be a one-way door.
-    blurb: 'Tap any table on the floor to open the conversation.',
-    pick: () => true
   }
 }
 
@@ -54,7 +50,9 @@ export function Lobby({ sync, mode = 'challenge', onPick, onReset, onBack }) {
     if (self) statuses.set(self.number, self.status)
 
     const placed = new Set((plan?.tables ?? []).map((t) => t.number))
-    const allowed = lobby.filter((t) => copy.pick({ status: t.status, blocked: blocked.includes(t.number) }))
+    const allowed = lobby.filter((t) =>
+      copy.pick({ status: t.status, blocked: blocked.includes(t.number), known: t.known })
+    )
     const selectable = new Set(allowed.filter((t) => placed.has(t.number)).map((t) => t.number))
     const offPlan = allowed.filter((t) => !placed.has(t.number))
 
@@ -124,7 +122,7 @@ export function Lobby({ sync, mode = 'challenge', onPick, onReset, onBack }) {
                 statuses={statuses}
                 selfNumber={self?.number ?? null}
                 selectable={selectable}
-                unread={mode === 'message' ? sync.social?.unread : null}
+                unread={mode === 'challenge' ? sync.social?.unread : null}
                 onTableTap={onPick}
               />
             ) : (

@@ -12,6 +12,7 @@ import {
   tickets,
   conversations,
   getThread,
+  hasThread,
   nextId,
   makeTable,
   seedBots
@@ -78,7 +79,9 @@ function lobbyFor(me) {
   return [...tables.values()]
     .filter((t) => t.number !== me && t.status !== 'gone')
     .sort((a, b) => a.number - b.number)
-    .map((t) => ({ number: t.number, status: t.status }))
+    // `known` is whether the two tables share a thread yet. On the floor plan
+    // that decides whether a tap opens the conversation or starts a challenge.
+    .map((t) => ({ number: t.number, status: t.status, known: me !== null && hasThread(me, t.number) }))
 }
 
 // Only the counts and flags ride along on every sync. Message bodies travel
@@ -264,6 +267,16 @@ function appendMessage(from, to, text, delivered) {
     at: Date.now(),
     deliveredAt: delivered ? Date.now() : null
   })
+  if (thread.messages.length > MAX_THREAD) {
+    thread.messages.splice(0, thread.messages.length - MAX_THREAD)
+  }
+}
+
+// A line in the thread that neither table wrote: the room noting what happened
+// between them. It has no recipient, so it never counts as unread or undelivered.
+function appendSystem(a, b, text) {
+  const thread = getThread(a, b)
+  thread.messages.push({ id: nextId('m'), from: null, to: null, system: true, text, at: Date.now() })
   if (thread.messages.length > MAX_THREAD) {
     thread.messages.splice(0, thread.messages.length - MAX_THREAD)
   }
@@ -729,6 +742,12 @@ function onConnection(socket) {
     log(from, { kind: 'challenge', direction: 'out', otherTable: target.number, item: menuItem, gameName: mod.name })
     log(target, { kind: 'challenge', direction: 'in', otherTable: from.number, item: menuItem, gameName: mod.name })
 
+    // A challenge is how two tables meet. From here on they share a thread, and
+    // tapping either one on the floor opens it instead of another challenge sheet.
+    appendSystem(from.number, target.number, `Table ${from.number} challenged Table ${target.number} to ${mod.name} for ${menuItem.name}.`)
+    pushThread(from, target.number)
+    pushThread(target, from.number)
+
     socketFor(target)?.emit('challenge:incoming', {
       id: challenge.id,
       fromTable: challenge.from,
@@ -849,7 +868,10 @@ function onConnection(socket) {
     if (!Number.isInteger(other)) return
 
     table.viewing = other
-    const changed = markRead(table, other)
+    // Opening a thread that didn't exist creates it, and the floor plan on both
+    // ends needs to know the pair is now acquainted.
+    const created = !hasThread(table.number, other)
+    const changed = markRead(table, other) || created
     pushThread(table, other)
 
     // The other end is watching for its read receipts to flip, so it needs the

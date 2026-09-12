@@ -30,6 +30,8 @@ export const conversations = new Map()
 // of them opens the chat first.
 const threadKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`)
 
+export const hasThread = (a, b) => conversations.has(threadKey(a, b))
+
 export function getThread(a, b) {
   const key = threadKey(a, b)
   let thread = conversations.get(key)

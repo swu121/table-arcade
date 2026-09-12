@@ -29,22 +29,6 @@ function GiftIcon({ size = 46 }) {
   )
 }
 
-function ChatIcon({ size = 46 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden="true">
-      <path
-        d="M40 28a4 4 0 0 1-4 4H16l-8 8V12a4 4 0 0 1 4-4h24a4 4 0 0 1 4 4v16Z"
-        stroke="currentColor"
-        strokeWidth="2.6"
-        strokeLinejoin="round"
-      />
-      <circle cx="17" cy="20" r="2.2" fill="currentColor" />
-      <circle cx="24" cy="20" r="2.2" fill="currentColor" />
-      <circle cx="31" cy="20" r="2.2" fill="currentColor" />
-    </svg>
-  )
-}
-
 const ACTIONS = [
   {
     id: 'challenge',
@@ -59,13 +43,6 @@ const ACTIONS = [
     blurb: 'Send a table a round — it goes on your tab',
     Icon: GiftIcon,
     tone: 'home-tile--mint'
-  },
-  {
-    id: 'message',
-    label: 'Message',
-    blurb: 'Say something to another table',
-    Icon: ChatIcon,
-    tone: 'home-tile--neon'
   }
 ]
 
@@ -117,7 +94,7 @@ export function Home({
           </p>
         </div>
 
-        <div className="mt-7 grid shrink-0 grid-cols-1 gap-3.5 sm:grid-cols-3">
+        <div className="mt-7 grid shrink-0 grid-cols-1 gap-3.5 sm:grid-cols-2">
           {ACTIONS.map(({ id, label, blurb, Icon, tone }) => (
             <button key={id} type="button" onClick={() => onGo(id)} className={`home-tile ${tone}`}>
               <span className="home-tile-icon">
@@ -127,7 +104,7 @@ export function Home({
                 {label}
               </span>
               <span className="mt-1.5 max-w-[22ch] text-center text-[0.78rem] leading-snug text-dim">{blurb}</span>
-              {id === 'message' && unreadMessages > 0 && (
+              {id === 'challenge' && unreadMessages > 0 && (
                 <span className="home-tile-badge">{unreadMessages > 9 ? '9+' : unreadMessages}</span>
               )}
             </button>

@@ -43,8 +43,9 @@ for on your tab.
 | --- | --- |
 | ![A thread between two tables](docs/screenshots/chat.png) | ![Sending a round](docs/screenshots/gift.png) |
 
-Tables can message each other — with read receipts, muting and blocking — or skip the game
-entirely and send a round, which goes straight to the bar on the sender's tab.
+A challenge opens a thread between the two tables — with read receipts, muting and blocking —
+and tapping that table on the floor afterwards drops you back into it, rematch button included.
+Or skip the game entirely and send a round, which goes straight to the bar on the sender's tab.
 
 ## Staff screen
 
