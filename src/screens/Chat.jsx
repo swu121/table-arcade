@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { EmojiPicker } from '../components/EmojiPicker.jsx'
 import { pad } from '../lib/format.js'
+import { LiveChallenge } from './Challenge.jsx'
 
 function BackIcon() {
   return (
@@ -32,7 +33,8 @@ function SwordsIcon() {
 }
 
 // Why the challenge button is off, in the words a guest would use.
-function challengeBlocker({ self, other, blocked }) {
+function challengeBlocker({ self, other, blocked, live }) {
+  if (live) return 'Challenge in play'
   if (blocked) return 'Unblock them first'
   if (!other) return "They're not on the floor"
   if (self.status !== 'idle') return "You're busy"
@@ -49,8 +51,11 @@ export function Chat({
   readAt,
   muted,
   blocked,
+  challenge,
   onBack,
   onChallenge,
+  onRespond,
+  onCancelChallenge,
   onSend,
   onMute,
   onBlock
@@ -60,13 +65,16 @@ export function Chat({
   const list = useRef(null)
   const input = useRef(null)
 
+  // Only a challenge with this table belongs in this thread.
+  const live = challenge && challenge.otherTable === withTable ? challenge : null
+
   useEffect(() => {
     const node = list.current
     if (node) node.scrollTop = node.scrollHeight
-  }, [messages])
+  }, [messages, live])
 
   const lastMine = messages.findLastIndex((message) => message.from === self.number)
-  const blocker = challengeBlocker({ self, other, blocked })
+  const blocker = challengeBlocker({ self, other, blocked, live })
 
   const send = () => {
     const body = draft.trim()
@@ -147,8 +155,15 @@ export function Chat({
         ) : (
           messages.map((message, i) => {
             if (message.system) {
+              const won = message.kind === 'result' && message.winner === self.number
+              const lost = message.kind === 'result' && message.winner != null && message.winner !== self.number
               return (
-                <div key={message.id} className="chat-system">
+                <div
+                  key={message.id}
+                  className={`chat-system chat-system--${message.kind ?? 'note'} ${won ? 'chat-system--won' : ''} ${
+                    lost ? 'chat-system--lost' : ''
+                  }`}
+                >
                   <span>{message.text}</span>
                   <span className="chat-system-time">{stamp(message.at)}</span>
                 </div>
@@ -167,6 +182,12 @@ export function Chat({
           })
         )}
       </div>
+
+      {live && (
+        <div className="shrink-0 px-5 pb-3">
+          <LiveChallenge challenge={live} onRespond={onRespond} onCancel={onCancelChallenge} />
+        </div>
+      )}
 
       <div className="relative shrink-0 border-t border-edge bg-black/25 px-5 py-4">
         {picker && <EmojiPicker onPick={(glyph) => setDraft((d) => d + glyph)} onClose={() => setPicker(false)} />}

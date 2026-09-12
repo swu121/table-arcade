@@ -20,26 +20,38 @@ export const MAX_THREAD = 200
 export const MAX_NOTIFICATIONS = 40
 export const MAX_HISTORY = 40
 
-export const tables = new Map()
-export const challenges = new Map()
-export const games = new Map()
-export const tickets = new Map()
-export const conversations = new Map()
+// One room per venue: the live state of one restaurant's floor. Everything in
+// here is for tonight only. Nothing a table does can reach another room, because
+// no handler ever holds more than one.
+export function createRoom({ venue, nsp, plans }) {
+  const room = {
+    venue,
+    nsp,
+    plans,
+    tables: new Map(),
+    challenges: new Map(),
+    games: new Map(),
+    tickets: new Map(),
+    conversations: new Map()
+  }
+  for (const n of venue.botTables) room.tables.set(n, makeTable(n, true))
+  return room
+}
 
 // One thread per unordered pair, so table 4 and table 12 share `4-12` whichever
 // of them opens the chat first.
 const threadKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`)
 
-export const hasThread = (a, b) => conversations.has(threadKey(a, b))
+export const hasThread = (room, a, b) => room.conversations.has(threadKey(a, b))
 
-export function getThread(a, b) {
+export function getThread(room, a, b) {
   const key = threadKey(a, b)
-  let thread = conversations.get(key)
+  let thread = room.conversations.get(key)
   if (!thread) {
     // readAt is keyed by table number: the last moment that table opened the
     // thread. Anything sent to them before it counts as read.
     thread = { key, messages: [], readAt: {} }
-    conversations.set(key, thread)
+    room.conversations.set(key, thread)
   }
   return thread
 }
@@ -73,8 +85,4 @@ export function makeTable(number, isBot = false) {
     // they watch count as read straight away.
     viewing: null
   }
-}
-
-export function seedBots() {
-  for (const n of BOT_TABLES) tables.set(n, makeTable(n, true))
 }

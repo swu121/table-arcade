@@ -576,6 +576,40 @@ button {
   color: var(--color-gold);
 }
 
+.chat-system--gameStart {
+  color: var(--color-mint);
+  background: rgba(46, 229, 157, 0.08);
+  border-color: rgba(46, 229, 157, 0.3);
+}
+
+.chat-system--challengeEnded {
+  color: var(--color-dim);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--color-edge);
+}
+
+.chat-system--result {
+  padding: 0.6rem 1.3rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--color-chalk);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--color-edge);
+}
+
+.chat-system--won {
+  color: var(--color-gold);
+  background: rgba(255, 182, 39, 0.14);
+  border-color: var(--color-gold);
+  box-shadow: 0 0 24px rgba(255, 182, 39, 0.18);
+}
+
+.chat-system--lost {
+  color: #ff7599;
+  background: rgba(255, 46, 99, 0.1);
+  border-color: rgba(255, 46, 99, 0.45);
+}
+
 .chat-system-time {
   font-size: 0.62rem;
   font-weight: 500;
@@ -1020,4 +1054,48 @@ button {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* A challenge in flight, pinned above the composer in a thread. */
+.live-challenge {
+  position: relative;
+  overflow: hidden;
+  padding: 1.1rem 1.25rem;
+  border-radius: 20px;
+  border: 1px solid var(--color-gold);
+  background: linear-gradient(135deg, rgba(255, 182, 39, 0.16), rgba(255, 182, 39, 0.04) 60%, rgba(0, 0, 0, 0.3));
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 182, 39, 0.2);
+}
+
+.live-challenge--incoming {
+  border-color: var(--color-neon);
+  background: linear-gradient(135deg, rgba(255, 46, 99, 0.18), rgba(255, 182, 39, 0.06) 55%, rgba(0, 0, 0, 0.3));
+}
+
+.live-challenge-glow {
+  position: absolute;
+  inset: -40%;
+  pointer-events: none;
+  background: radial-gradient(circle at 15% 40%, rgba(255, 182, 39, 0.22), transparent 45%);
+  animation: live-sweep 3.2s ease-in-out infinite alternate;
+}
+
+.live-challenge--incoming .live-challenge-glow {
+  background: radial-gradient(circle at 15% 40%, rgba(255, 46, 99, 0.24), transparent 45%);
+}
+
+@keyframes live-sweep {
+  from { transform: translateX(-6%); }
+  to { transform: translateX(10%); }
+}
+
+.live-challenge-icon {
+  display: grid;
+  flex-shrink: 0;
+  width: 4.25rem;
+  height: 4.25rem;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--color-edge);
 }

@@ -10,7 +10,6 @@ import { Lobby } from './screens/Lobby.jsx'
 import { Chat } from './screens/Chat.jsx'
 import { WagerSheet } from './screens/WagerSheet.jsx'
 import { GiftSheet } from './screens/GiftSheet.jsx'
-import { IncomingChallenge, WaitingForAnswer } from './screens/Challenge.jsx'
 import { Game } from './screens/Game.jsx'
 import { Result } from './screens/Result.jsx'
 import { Staff } from './screens/Staff.jsx'
@@ -99,6 +98,8 @@ function TabletApp() {
     }
 
     const onChallengeEnded = ({ reason, otherTable }) => {
+      // The thread already says so, in its own words, when it's on screen.
+      if (openChat.current === otherTable) return
       const line = ENDED_COPY[reason]
       if (line) showToast(line(otherTable))
     }
@@ -180,13 +181,22 @@ function TabletApp() {
     }
   }, [signedIn])
 
-  // Whatever the table was browsing, a game takes over — come back to the home
-  // screen afterwards rather than mid-flow in a picker.
+  // A challenge lives in the thread between the two tables, so whichever side
+  // isn't looking at that thread gets taken there. Both then see the same card.
+  const challengeWith = sync?.challenge?.otherTable ?? null
   useEffect(() => {
-    if (sync?.game) {
-      setView('home')
-      setChatWith(null)
-    }
+    if (challengeWith === null) return
+    setChatWith((current) => {
+      if (current !== challengeWith) socket.emit('chat:open', { withTable: challengeWith })
+      return challengeWith
+    })
+  }, [challengeWith])
+
+  // Whatever the table was browsing, a game takes over. The thread it started
+  // from stays underneath, so the result screen hands back to it — the outcome
+  // is written there.
+  useEffect(() => {
+    if (sync?.game) setView('home')
   }, [sync?.game])
 
   const assignTable = (number) => {
@@ -278,8 +288,11 @@ function TabletApp() {
         other={(sync.lobby ?? []).find((t) => t.number === chatWith) ?? null}
         muted={social.muted.includes(chatWith)}
         blocked={social.blocked.includes(chatWith)}
+        challenge={sync.challenge}
         onBack={() => setChatWith(null)}
         onChallenge={() => setWagerTarget({ number: chatWith })}
+        onRespond={(accept) => socket.emit('challenge:respond', { challengeId: sync.challenge.id, accept })}
+        onCancelChallenge={() => socket.emit('challenge:cancel')}
         onSend={(text) => socket.emit('chat:send', { toTable: chatWith, text })}
         onMute={() => socket.emit('chat:mute', { table: chatWith, muted: !social.muted.includes(chatWith) })}
         onBlock={() => socket.emit('chat:block', { table: chatWith, blocked: !social.blocked.includes(chatWith) })}
@@ -310,8 +323,6 @@ function TabletApp() {
     )
   }
 
-  const challenge = sync.challenge
-
   return (
     <Shell>
       {screen}
@@ -333,17 +344,6 @@ function TabletApp() {
           onCancel={() => setGiftTarget(null)}
           onSend={sendGift}
         />
-      )}
-
-      {challenge?.role === 'to' && (
-        <IncomingChallenge
-          challenge={challenge}
-          onRespond={(accept) => socket.emit('challenge:respond', { challengeId: challenge.id, accept })}
-        />
-      )}
-
-      {challenge?.role === 'from' && (
-        <WaitingForAnswer challenge={challenge} onCancel={() => socket.emit('challenge:cancel')} />
       )}
 
       {!connected && <OfflineBanner />}

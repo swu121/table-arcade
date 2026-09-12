@@ -72,8 +72,8 @@ Tables with unread messages carry a count badge.
 Tapping a table in challenge mode does one of two things:
 
 - A table you have never dealt with opens the challenge sheet below. Sending the challenge
-  creates a thread between the two tables and drops you straight into it, with the challenge
-  noted in it and the waiting sheet on top until they answer.
+  creates a thread between the two tables and drops both of you straight into it, with the
+  challenge as a live card until they answer.
 - A table you already share a thread with opens that thread instead. There is a **Challenge**
   button in the thread header for the rematch; it is greyed out with a reason if either side
   is busy or the table is blocked.
@@ -93,14 +93,17 @@ The menu is eight items, drinks and food, $7 to $22:
 | Draft Beer $7 | House Shot $9 | Truffle Fries $9 | Wings, 6pc $12 |
 | Old Fashioned $14 | Loaded Nachos $14 | Smash Burger $16 | House Pitcher $22 |
 
-Once sent, both tables watch the same **30 second** countdown ring.
+Once sent, both tables are taken into the thread they share, where the challenge sits as a
+live card above the composer with the same **30 second** countdown ring on both ends.
 
 | Sender waits | Receiver decides |
 | --- | --- |
 | ![Waiting on the other table](screenshots/challenge-waiting.png) | ![An incoming challenge](screenshots/challenge-incoming.png) |
 
-The sender can cancel; the receiver can accept or decline; if nobody answers it expires and
-both sides get told why. If two tables challenge each other at the same moment, the lower table
+The sender can cancel; the receiver can accept or decline; if nobody answers it expires. Each
+of those is written into the thread as a line from the room, and so is the game starting and
+how it ended — who won, who walked away, and whose tab the stake landed on. The result screen
+hands you back to the thread, so the whole history of two tables is in one place. If two tables challenge each other at the same moment, the lower table
 number wins the race and the other one is told to answer the invite it already has.
 
 ## The games
@@ -179,7 +182,7 @@ they just get told a round is on its way, and a ticket appears for staff.
 ![A thread between two tables](screenshots/chat.png)
 
 One thread per pair of tables, started by the first challenge between them and reopened from
-the floor plan after that. Challenges sent from inside the thread leave a note in it. Free text
+the floor plan after that. Every challenge, answer and game result is noted in it. Free text
 up to 280 characters, with an emoji picker organised into six tabs. Threads keep their last
 200 messages.
 

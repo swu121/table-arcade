@@ -211,6 +211,14 @@ function cancelChallenge(challenge, reason) {
   challenge.status = reason
   detachChallenge(challenge)
 
+  // Who the ending is attributed to: the challenged table for a decline or a
+  // timeout, the challenger for a cancel. A drop names whoever went.
+  const line = ENDED_NOTE[reason]
+  if (line) {
+    const by = reason === 'cancelled' ? challenge.from : reason === 'disconnected' ? challenge.goneTable ?? challenge.to : challenge.to
+    note(challenge.from, challenge.to, 'challengeEnded', line(by, challenge.item.name))
+  }
+
   for (const number of [challenge.from, challenge.to]) {
     const other = number === challenge.from ? challenge.to : challenge.from
     log(tables.get(number), { kind: 'challengeEnded', otherTable: other, reason })
@@ -273,13 +281,25 @@ function appendMessage(from, to, text, delivered) {
 }
 
 // A line in the thread that neither table wrote: the room noting what happened
-// between them. It has no recipient, so it never counts as unread or undelivered.
-function appendSystem(a, b, text) {
+// between them. It has no recipient, so it never counts as unread or undelivered,
+// and both ends get the thread again so an open chat shows it land.
+function note(a, b, kind, text, extra = {}) {
   const thread = getThread(a, b)
-  thread.messages.push({ id: nextId('m'), from: null, to: null, system: true, text, at: Date.now() })
+  thread.messages.push({ id: nextId('m'), from: null, to: null, system: true, kind, text, at: Date.now(), ...extra })
   if (thread.messages.length > MAX_THREAD) {
     thread.messages.splice(0, thread.messages.length - MAX_THREAD)
   }
+  const ta = tables.get(a)
+  const tb = tables.get(b)
+  if (ta) pushThread(ta, b)
+  if (tb) pushThread(tb, a)
+}
+
+const ENDED_NOTE = {
+  declined: (by, item) => `Table ${by} passed on playing for ${item}.`,
+  expired: (by) => `Table ${by} didn't answer in time.`,
+  cancelled: (by) => `Table ${by} called the challenge off.`,
+  disconnected: (by) => `Table ${by} dropped off before answering.`
 }
 
 // A table that reconnects after a drop has to collect everything that piled up
@@ -445,6 +465,8 @@ function startGame(challenge) {
     })
   }
 
+  note(players[0], players[1], 'gameStart', `Game on — ${mod.name} for ${game.item.name}.`)
+
   mod.tick?.(game, game.ctx)
   return game
 }
@@ -490,12 +512,27 @@ function endGame(game, winner, reason) {
     socketFor(table)?.emit('game:over', table.lastResult)
   }
 
+  const [a, b] = game.players
+  if (winner === null) {
+    note(a, b, 'result', `${mod.name} ended in a draw. Nobody pays for the ${game.item.name}.`, { winner: null })
+  } else {
+    const loser = game.players.find((p) => p !== winner)
+    const how =
+      reason === 'quit'
+        ? `Table ${loser} walked away from ${mod.name}.`
+        : reason === 'forfeit'
+          ? `Table ${loser} never came back to ${mod.name}.`
+          : `Table ${winner} beat Table ${loser} at ${mod.name}.`
+    note(a, b, 'result', `${how} ${game.item.name} is on Table ${loser}.`, { winner })
+  }
+
   games.delete(game.id)
   syncStaff()
 }
 
 function voidGame(game) {
   game.status = 'void'
+  note(game.players[0], game.players[1], 'challengeEnded', `The ${getGame(game.type).name} game was called off.`)
   for (const number of game.players) {
     const table = tables.get(number)
     if (!table) continue
@@ -744,9 +781,7 @@ function onConnection(socket) {
 
     // A challenge is how two tables meet. From here on they share a thread, and
     // tapping either one on the floor opens it instead of another challenge sheet.
-    appendSystem(from.number, target.number, `Table ${from.number} challenged Table ${target.number} to ${mod.name} for ${menuItem.name}.`)
-    pushThread(from, target.number)
-    pushThread(target, from.number)
+    note(from.number, target.number, 'challenge', `Table ${from.number} challenged Table ${target.number} to ${mod.name} for ${menuItem.name}.`)
 
     socketFor(target)?.emit('challenge:incoming', {
       id: challenge.id,
@@ -1022,7 +1057,11 @@ function onConnection(socket) {
     table.viewing = null
     if (table.signedIn) log(table, { kind: 'left' })
 
-    if (table.challengeId) cancelChallenge(challenges.get(table.challengeId), 'disconnected')
+    if (table.challengeId) {
+      const challenge = challenges.get(table.challengeId)
+      if (challenge) challenge.goneTable = table.number
+      cancelChallenge(challenge, 'disconnected')
+    }
 
     const game = table.gameId ? games.get(table.gameId) : null
     if (game && game.status === 'active') {
