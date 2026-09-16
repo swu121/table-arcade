@@ -117,9 +117,19 @@ npm run dev
 
 ```sh
 npm test            # server-side game rules
+npm run test:e2e    # browser tests: tablets and staff screen, in Chromium
 npm run build       # production client bundle
 npm start           # serve the built client from the node server
 ```
+
+### Browser tests
+
+`npm run test:e2e` runs the Playwright suite in `e2e/`. It builds the client, starts the
+production server on port 3457 with a throwaway `DATA_DIR` holding two venues, and drives
+real tablets — each one a browser context with its own localStorage and socket — through
+claiming a table, challenging, playing, chatting, gifting, the staff ticket board and the
+floor plan editor, plus cross-venue isolation. Chromium is the only browser; install it once
+with `npx playwright install chromium`. The plan is in [`docs/plans/e2e.md`](docs/plans/e2e.md).
 
 ## Layout
 
@@ -136,6 +146,10 @@ src/
   screens/        lobby, game host, per-game screens, result, staff
   components/     board, chrome, icons
   styles/         Tailwind v4 theme and per-game CSS
+e2e/
+  helpers.js      tablets as browser contexts, the hold-to-assign gesture
+  *.spec.js       routes, claim, challenge, chat, gift, floor plan, isolation
+  serve.mjs       builds the client and starts the server for the suite
 ```
 
 Built with React, Vite, Tailwind, Express and socket.io. Designed for a landscape tablet.

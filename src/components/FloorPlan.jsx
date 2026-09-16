@@ -144,6 +144,7 @@ function Table({
   return (
     <g
       className="fp-item fp-table"
+      data-table={number}
       data-status={status}
       data-self={isSelf || undefined}
       data-active={interactive || undefined}

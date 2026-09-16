@@ -9,3 +9,7 @@ dist
 # floor plans (fall back to defaultPlan()).
 data/
 .playwright-mcp
+
+# Playwright output
+test-results/
+playwright-report/
