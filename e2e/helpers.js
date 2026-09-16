@@ -48,7 +48,9 @@ export const test = base.extend({
 
     await use({
       tablet: (slug) => open(`/v/${slug}`),
-      staff: async (slug) => staffPage(await open(null), slug)
+      staff: async (slug) => staffPage(await open(null), slug),
+      // Any other screen on its own context — /admin, which belongs to no venue.
+      page: (path = null) => open(path)
     })
 
     await Promise.all(contexts.map((context) => context.close()))

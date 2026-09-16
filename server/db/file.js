@@ -90,6 +90,7 @@ export function createFileRepos(dataDir) {
         const list = Array.isArray(raw) ? raw : []
         const entry = { slug: venue.slug, name: venue.name, menu: venue.menu, botTables: venue.botTables }
         if (typeof venue.requirePairing === 'boolean') entry.requirePairing = venue.requirePairing
+        if (venue.archived === true) entry.archived = true
         const at = list.findIndex((v) => v?.slug === venue.slug)
         if (at === -1) list.push(entry)
         else list[at] = entry

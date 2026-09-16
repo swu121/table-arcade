@@ -17,7 +17,8 @@ const venue = (slug) => ({
   name: 'North',
   menu: [{ id: 'soju', name: 'Soju', price: 12, icon: 'shot' }],
   botTables: [12],
-  requirePairing: false
+  requirePairing: false,
+  archived: false
 })
 
 const PLAN = {

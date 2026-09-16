@@ -7,6 +7,7 @@ import { clearDeviceToken } from './lib/device.js'
 import { clearStaffSession, getStaffSession, staffLogout } from './lib/staffSession.js'
 import { Backdrop, OfflineBanner, Toast } from './components/Bits.jsx'
 import { Mark, Wordmark } from './components/Logo.jsx'
+import { Admin } from './screens/Admin.jsx'
 import { Pairing } from './screens/Pairing.jsx'
 import { StaffLogin } from './screens/StaffLogin.jsx'
 import { Devices } from './screens/Devices.jsx'
@@ -586,9 +587,18 @@ export default function App() {
   const { missing, unpaired, paired, signedOut, signedIn, signOut } = useGate()
 
   useEffect(() => {
-    if (!route.slug) redirectToDefault(route.staff).catch(console.error)
+    if (!route.slug && !route.admin) redirectToDefault(route.staff).catch(console.error)
   }, [])
 
+  // /admin belongs to no venue: it holds no socket, claims no table and is
+  // never redirected anywhere.
+  if (route.admin) {
+    return (
+      <Shell>
+        <Admin />
+      </Shell>
+    )
+  }
   if (!route.slug) {
     return (
       <Shell>

@@ -5,6 +5,7 @@ import { networkInterfaces } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Server } from 'socket.io'
+import { adminEnabled, adminPage, adminRouter, reportAdminMode } from './admin.js'
 import { createRepos } from './db/index.js'
 import { init, reportClientError } from './handlers.js'
 import { pairHandler } from './pairing.js'
@@ -59,6 +60,10 @@ app.post('/api/client-error', express.json({ limit: '32kb' }), (req, res) => {
 // A tablet trades a staff-issued pairing code for its device token here.
 app.post('/api/venue/:slug/pair', express.json({ limit: '4kb' }), pairHandler({ roomFor }))
 
+// The platform operator's page: venues are created and edited here, on the
+// running server. Logic lives in server/admin.js; this is the mount point.
+app.use('/api/admin', adminRouter({ arcade, repos }))
+
 // Staff sign in here for the session token their socket handshake carries.
 app.post('/api/venue/:slug/staff/login', express.json({ limit: '4kb' }), loginHandler({ roomFor }))
 app.post('/api/venue/:slug/staff/logout', express.json({ limit: '4kb' }), logoutHandler({ roomFor }))
@@ -74,6 +79,8 @@ app.get('/api/venue', (_req, res) => {
 
 if (process.env.NODE_ENV === 'production') {
   app.get(['/', '/staff'], (req, res) => res.redirect(`/v/${venues.default().slug}${req.path === '/' ? '' : req.path}`))
+  // With no operator configured there is no admin page to fall through to.
+  app.get('/admin', adminPage())
   app.use(express.static(dist, { maxAge: '1h', index: false }))
   app.use((req, res, next) => {
     if (req.method !== 'GET') return next()
@@ -111,7 +118,10 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   const dev = process.env.NODE_ENV !== 'production'
   const clientPort = dev ? 5173 : PORT
   const storage = repos.backend === 'postgres' ? 'postgres' : `${repos.backend} (${dataDir})`
-  console.log(`\n  TABLE ARCADE  ·  ${dev ? 'development' : 'production'}  ·  build ${version}  ·  storage: ${storage}\n`)
+  console.log(`\n  TABLE ARCADE  ·  ${dev ? 'development' : 'production'}  ·  build ${version}  ·  storage: ${storage}`)
+  reportAdminMode(console.log)
+  if (adminEnabled()) console.log(`    admin    http://localhost:${clientPort}/admin`)
+  console.log('')
   for (const venue of venues.all()) {
     console.log(`  ${venue.name} (${venue.slug})`)
     console.log(`    local    http://localhost:${clientPort}/v/${venue.slug}`)

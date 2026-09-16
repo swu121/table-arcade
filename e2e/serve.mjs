@@ -4,7 +4,8 @@ import { execFileSync, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createFileRepos } from '../server/db/index.js'
-import { DATA_DIR, PORT, ROOT, STAFF, VENUES } from './env.js'
+import { hashPassword } from '../server/db/staff.js'
+import { ADMIN, DATA_DIR, PORT, ROOT, STAFF, VENUES } from './env.js'
 
 fs.rmSync(DATA_DIR, { recursive: true, force: true })
 fs.mkdirSync(DATA_DIR, { recursive: true })
@@ -17,10 +18,21 @@ for (const venue of VENUES) await repos.staff.create({ venue: venue.slug, ...STA
 
 execFileSync('npm', ['run', 'build'], { cwd: ROOT, stdio: ['ignore', 'ignore', 'inherit'] })
 
+// The platform operator, configured the way a real deploy configures one:
+// two env vars and no row anywhere.
+const ADMIN_PASSWORD_HASH = await hashPassword(ADMIN.password)
+
 const server = spawn(process.execPath, ['server/index.js'], {
   cwd: ROOT,
   stdio: 'inherit',
-  env: { ...process.env, PORT: String(PORT), NODE_ENV: 'production', DATA_DIR }
+  env: {
+    ...process.env,
+    PORT: String(PORT),
+    NODE_ENV: 'production',
+    DATA_DIR,
+    ADMIN_EMAIL: ADMIN.email,
+    ADMIN_PASSWORD_HASH
+  }
 })
 
 for (const signal of ['SIGINT', 'SIGTERM']) {

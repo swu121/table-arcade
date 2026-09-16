@@ -98,13 +98,41 @@ identical run without streaming any geometry between them.
 ## Venues
 
 One server runs any number of restaurants. Each is a **venue** with its own slug, name, menu,
-bot tables, floor plan and paired tablets, listed in `data/venues.json` (see
-[`docs/venues.example.json`](docs/venues.example.json)). Onboarding a restaurant is adding an
-entry there; nothing gets deployed.
+bot tables, floor plan, paired tablets and staff accounts.
 
 - Guest tablets — `/v/<slug>`
 - Staff — `/v/<slug>/staff`
+- Admin — `/admin`
 - The bare URL sends you to the first venue listed, so the single-venue demo still works.
+
+### Onboarding a venue
+
+`/admin` is the platform operator's page, and it is the whole of onboarding: name the
+restaurant, take the address it suggests, add the account whoever runs the floor will sign in
+with, and hand a pairing code to the first tablet. The venue is live the moment it is created
+— the registry is mutable and namespaces are minted on demand, so nothing is edited and
+nothing is restarted. The same page edits a venue's name, menu, bot tables and pairing on the
+running server, with the change reaching every connected tablet on its next sync, and archives
+one (there is no delete: an archived venue's address is refused like a slug nobody set up, and
+its plans, tickets, tablets and accounts stay put).
+
+The operator is two env vars — one for the whole server, not per venue:
+
+```sh
+npm run admin:hash                      # prompts for a password, prints the hash
+export ADMIN_EMAIL=you@example.com
+export ADMIN_PASSWORD_HASH='scrypt:…'
+```
+
+On the dev server with neither set, `/admin` is simply open and says so, the way the staff
+screen's **Continue (dev)** door does. In production with neither set there is no admin page
+at all: `/admin` is a 404 and the server says so once at boot.
+
+Venues still live in `data/venues.json` (see
+[`docs/venues.example.json`](docs/venues.example.json)) or the `venues` table, and the admin
+page writes through to whichever one the server is using — so a venue created tonight is there
+after the next deploy. Editing that file by hand, or `npm run seed`, still works as the CLI
+alternative.
 
 Every venue is its own socket.io namespace and its own in-memory room (`server/state.js`,
 `createRoom`). A tablet only ever holds a connection into one namespace, and every handler
@@ -161,7 +189,7 @@ one account exists, the rest are added from the staff screen. In production this
 way in: a venue with no accounts has no staff screen.
 
 ```sh
-npm test            # game rules, venue isolation, persistence, pairing, staff login, restarts — no database needed
+npm test            # game rules, venue isolation, persistence, pairing, staff login, admin, restarts — no database needed
 npm run test:e2e    # browser tests: tablets and staff screen, in Chromium
 npm run build       # production client bundle
 npm start           # serve the built client from the node server
@@ -183,9 +211,10 @@ npm start           # migrations in server/db/migrations/ run at boot
 `npm run db:migrate` applies pending migrations without starting the server. Tests against
 the Postgres backend run only when `DATABASE_URL` is set, and are skipped otherwise.
 
-On Fly, `fly secrets set DATABASE_URL=...` and deploy; no volume is needed. Then
-`fly ssh console -C "npm run seed"` once, and
-`fly ssh console -C "STAFF_PASSWORD=... npm run staff:add -- <slug> <email> <name>"` per venue.
+On Fly, `fly secrets set DATABASE_URL=...` and deploy; no volume is needed. Add the operator
+with `fly secrets set ADMIN_EMAIL=... ADMIN_PASSWORD_HASH=...` and every venue after that is
+onboarded from `/admin`. `fly ssh console -C "npm run seed"` is the CLI alternative for a
+first batch.
 
 ### Browser tests
 
@@ -193,7 +222,8 @@ On Fly, `fly secrets set DATABASE_URL=...` and deploy; no volume is needed. Then
 production server on port 3457 with a throwaway `DATA_DIR` holding two venues (each seeded
 with one staff account), and drives real tablets — each one a browser context with its own
 localStorage and socket — through claiming a table, challenging, playing, chatting, gifting,
-the staff login, the staff ticket board and the floor plan editor, plus cross-venue isolation. Chromium is the only browser; install it once
+the staff login, the staff ticket board, the floor plan editor and onboarding a venue from
+`/admin`, plus cross-venue isolation. Chromium is the only browser; install it once
 with `npx playwright install chromium`. The plan is in [`docs/plans/e2e.md`](docs/plans/e2e.md).
 
 ## Layout
@@ -205,6 +235,7 @@ server/
   handlers.js     lobby, challenges, games, tickets — one room per venue
   pairing.js      pairing codes, the device-token handshake, POST /api/venue/:slug/pair
   staff.js        staff sessions, the staff handshake, /api/venue/:slug/staff/{login,logout,status}
+  admin.js        the operator's session and /api/admin/*: venues created and edited live
   ratelimit.js    the sliding-window limiter pairing and login share
   state.js        createRoom(): per-venue in-memory tables/games/tickets/chat
   snapshot.js     a room written down for a restart, and read back
@@ -216,13 +247,14 @@ server/
 scripts/
   seed.js         put docs/venues.example.json into Postgres on a first deploy
   staff-add.js    the first staff account for a venue
+  admin-hash.js   a password hash for ADMIN_PASSWORD_HASH
 src/
-  screens/        lobby, game host, per-game screens, result, staff
+  screens/        lobby, game host, per-game screens, result, staff, admin
   components/     board, chrome, icons
   styles/         Tailwind v4 theme and per-game CSS
 e2e/
   helpers.js      tablets as browser contexts, the staff sign-in, the hold-to-assign gesture
-  *.spec.js       routes, claim, challenge, chat, gift, floor plan, isolation, staff login
+  *.spec.js       routes, claim, challenge, chat, gift, floor plan, isolation, staff login, admin
   serve.mjs       builds the client and starts the server for the suite
 ```
 
