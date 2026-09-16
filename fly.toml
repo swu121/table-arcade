@@ -1,5 +1,5 @@
 app = "tablearcade"
-primary_region = "sjc"
+primary_region = "iad"
 
 # A deploy is SIGTERM, then this long before the machine is killed. The server
 # uses it to snapshot every room (games, challenges, threads, who's seated) to
@@ -50,6 +50,10 @@ kill_timeout = "10s"
     path = "/healthz"
     timeout = "5s"
 
+# One machine, deliberately. Every room — who is seated, live games, chat —
+# lives in that machine's memory, so a second one would be a second, separate
+# floor: two tablets in the same venue could land on different machines and
+# never see each other. Deploy with --ha=false; scale by venue, not by machine.
 [[vm]]
   size = "shared-cpu-1x"
   memory = "512mb"
