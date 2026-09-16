@@ -1,6 +1,13 @@
 app = "tablearcade"
 primary_region = "sea"
 
+# A deploy is SIGTERM, then this long before the machine is killed. The server
+# uses it to snapshot every room (games, challenges, threads, who's seated) to
+# the store, tell every tablet it's restarting, and exit — bounded at 8s on its
+# side, so it always fits. The next boot reads the snapshot back and the
+# tablets reconnect to the same game. The default (5s) is too tight for that.
+kill_timeout = "10s"
+
 [build]
 
 [env]
@@ -16,8 +23,10 @@ primary_region = "sea"
 [http_service]
   internal_port = 3000
   force_https = true
-  # Every game, challenge and chat thread lives in memory. Stopping the machine
-  # wipes the room mid-pitch, so this one stays up.
+  # Every game, challenge and chat thread lives in memory. A deploy carries
+  # them across (see kill_timeout), but a machine stopped for being idle would
+  # need a tablet to wake it and its snapshot would be stale by then — so this
+  # one stays up.
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1

@@ -121,6 +121,14 @@ six-digit code — so knowing a venue's URL isn't enough to put items on a real 
 enforced when `NODE_ENV=production` (or per venue with `requirePairing` in the venue row); the
 dev server leaves it off. The staff screen itself has no login yet; that's next.
 
+Live state — who's seated, challenges, games, chat — lives in memory. What has to outlive a
+deploy goes through a small repository layer (`server/db/`): venues, floor plans and tickets.
+Set `DATABASE_URL` and those live in Postgres; leave it unset and venues and plans are JSON
+under `data/` (or `DATA_DIR`) with tickets kept in memory. A planned restart is the one
+exception for live state: on SIGTERM every room is snapshotted through the same layer and picked
+back up on the next boot, so a deploy mid-game is a few seconds of "Restarting" on the tablet
+and then the same board.
+
 ## Running it
 
 ```sh
@@ -134,11 +142,16 @@ npm run dev
 `npm run dev` prints every venue with a LAN address, which is what the tablets actually point at.
 
 ```sh
-npm test            # game rules, venue isolation, persistence, pairing — no database needed
+npm test            # game rules, venue isolation, persistence, pairing, restarts — no database needed
 npm run test:e2e    # browser tests: tablets and staff screen, in Chromium
 npm run build       # production client bundle
 npm start           # serve the built client from the node server
 ```
+
+Stopping the server (Ctrl-C, or SIGTERM from a deploy) is graceful: it snapshots every room,
+tells the tablets it is restarting, and exits within 8s. Start it again inside a minute and
+the tablets reconnect to the same games and threads; leave it longer and the snapshot is
+discarded. Without Postgres the snapshot sits at `data/venues/<slug>/snapshot.json`.
 
 ### With Postgres
 
@@ -172,6 +185,8 @@ server/
   handlers.js     lobby, challenges, games, tickets — one room per venue
   pairing.js      pairing codes, the device-token handshake, POST /api/venue/:slug/pair
   state.js        createRoom(): per-venue in-memory tables/games/tickets/chat
+  snapshot.js     a room written down for a restart, and read back
+  shutdown.js     SIGTERM: suspend every room, tell the tablets, close, exit
   floorplan.js    per-venue layout: default plan, validation, in-room store
   rooms.test.js   two venues on one server can't reach each other; rooms rehydrate
   db/             repository layer: postgres | file | memory, migrations, seed target

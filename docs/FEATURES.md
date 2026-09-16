@@ -382,36 +382,66 @@ What a hung main thread cannot do is run any of this. A tablet stuck in a true i
 stops answering socket.io's pings and drops to *Tablet offline* on the staff plan within about
 half a minute; getting it back is a kiosk-app or physical restart.
 
+### A planned restart
+
+A deploy or a restart is a SIGTERM, and the server treats it as a pause rather than an ending.
+It stops letting new connections in, writes every room down — who is seated, every pending
+challenge, every live game with its board and bot mid-move, every thread, inbox and mute list —
+through the repository as a *room snapshot*, tells every tablet `app:restarting`, and closes the
+sockets. The tablet's banner reads *Restarting* instead of *Reconnecting*, it keeps its table
+number, and socket.io's own reconnect loop brings it back; nothing reloads. The whole exit is
+bounded at 8s (Fly waits 10s, `kill_timeout`), so a hung write can never hold up a deploy — it
+just means that one restart comes up empty, as every restart used to.
+
+The next boot reads the snapshot back when the venue's room is first created, rebuilds every
+timer from its deadline (what was left of a challenge's thirty seconds, the bot's next move, a
+race's count-in and ceiling), and clears the snapshot so it can never be replayed. Every table
+comes back unbound, so the same path a dropped tablet takes picks them up: the tablet reclaims
+its number, the frozen game unfreezes, and pending deliveries flush. A game whose tablets never
+return is treated exactly like one whose tablets walked away — the 60s grace, then a forfeit
+claim or, against a bot, the sweep. A snapshot older than that grace, or written by a different
+build of the format, is discarded with a line in the log, and the room starts clean.
+
+A crash gets none of this. Only a signal writes the snapshot; a process that dies mid-night
+comes back empty, which is the honest outcome.
+
 ## State
 
 Two kinds. **Tonight's** state — seated tables, challenges, games, chat threads, notifications,
-table history — lives in memory, per room, and stopping the process wipes it. **Durable** state
-— venues, floor plans and tickets — goes through the repository layer in `server/db/` and comes
-back when the server does.
+table history — lives in memory, per room. **Durable** state — venues, floor plans and tickets
+— goes through the repository layer in `server/db/` and comes back when the server does.
+Tonight's state gets one concession: a *planned* stop suspends it through the same layer as a
+room snapshot, good for the 60s reconnect grace, so a deploy is not the thing that ends the
+night (see [A planned restart](#a-planned-restart)). A crash still wipes it.
 
 Handlers never touch storage directly. Each room carries `repos`, and:
 
 - On boot the venue list is read from the store (an empty store is the single demo venue).
 - When a venue's room is first created it is *hydrated*: the saved floor plan (validated and
-  clamped like any save) and every open ticket are loaded before the first socket's handlers
-  attach, so the staff board after a restart is the board before it.
+  clamped like any save) and every open ticket are loaded, then the room snapshot if a graceful
+  shutdown left one, all before the first socket's handlers attach — so the room after a
+  restart is the room before it.
 - Every ticket created, delivered or cleared, and every floor plan saved or reset, is written
   through in the background. The room's in-memory Map stays the source for every broadcast; a
   failed write is logged with the venue slug and never reaches a socket handler.
+- On SIGTERM every room is written once as a snapshot (`server/snapshot.js`: tables minus
+  their sockets, challenges and games with every deadline stored relative to the moment it was
+  taken, threads, and the ticket Map). It is read back once and cleared.
 
 Which store is decided once at startup:
 
-| `DATABASE_URL` | Backend | Venues | Floor plans | Tickets |
-| --- | --- | --- | --- | --- |
-| set | Postgres (`pg`) | `venues` | `floorplans` | `tickets` (open ones rehydrate) |
-| unset | files under `DATA_DIR` (default `data/`) | `venues.json` | `venues/<slug>/floorplan.json` | memory, lost on restart |
+| `DATABASE_URL` | Backend | Venues | Floor plans | Tickets | Room snapshot |
+| --- | --- | --- | --- | --- | --- |
+| set | Postgres (`pg`) | `venues` | `floorplans` | `tickets` (open ones rehydrate) | `room_snapshots` |
+| unset | files under `DATA_DIR` (default `data/`) | `venues.json` | `venues/<slug>/floorplan.json` | memory — carried across a planned restart by the snapshot, lost in a crash | `venues/<slug>/snapshot.json` |
 
 The Postgres schema is versioned: `server/db/migrate.js` applies each `server/db/migrations/*.sql`
 once, in order, recording it in `schema_migrations`, under an advisory lock so two machines
 rolling at the same time cannot both create the tables. It runs at boot and as `npm run db:migrate`.
 The first migration also creates `devices` (paired tablets, see [Pairing](#pairing)) and
 `staff_users` (`venue_id`, `email`, `password_hash`, …), the latter unused until staff login
-lands; the second adds `devices.last_seen_at` and `venues.require_pairing`. `npm run seed` upserts the venues in
+lands; the second adds `devices.last_seen_at` and `venues.require_pairing`; the third adds
+`room_snapshots`. `npm run seed` upserts the venues in
 `docs/venues.example.json` for a first deploy.
 
 The in-memory backend behind the tests has the same interface, so every test runs without a
@@ -423,7 +453,8 @@ and are skipped otherwise.
 | Setting | Value | Where |
 | --- | --- | --- |
 | Challenge expiry | 30s | `server/state.js` |
-| Reconnect grace | 60s | `server/state.js` |
+| Reconnect grace (and how old a room snapshot may be) | 60s | `server/state.js` |
+| Shutdown budget | 8s, under Fly's 10s `kill_timeout` | `server/index.js`, `fly.toml` |
 | Bot tables | 12, 17, 20 | `server/state.js`, per venue in the venue store |
 | Menu and prices | 8 items | `server/state.js`, per venue in the venue store |
 | Message length / thread / inbox / history | 280 / 200 / 40 / 40 | `server/state.js` |
@@ -441,13 +472,14 @@ and are skipped otherwise.
 This is a demo for pitching bar owners, not a pilot. The following are missing on purpose, not
 by omission:
 
-- **No database for the night itself.** A bar night is ephemeral; a restart wipes every live
-  room. Only venues, floor plans and tickets persist (Postgres, or JSON on disk without one) —
-  no game history, no chat archive.
 - **No staff login yet.** Tables are identified by number and tablets by a device token staff
   issue when pairing, so a venue's slug alone no longer gets a tablet in. But anyone who reaches
   a venue's `/staff` URL can still run that floor — and, for now, pair tablets. The
   `staff_users` table exists for the login that closes this; nothing reads it yet.
+- **No database for the night itself.** A bar night is ephemeral. Only venues, floor plans and
+  tickets persist (Postgres, or JSON on disk without one) — no game history, no chat archive.
+  A planned restart carries the live rooms across in a snapshot that is read once and thrown
+  away; that is a courtesy to whoever is mid-game, not a record. A crash still loses the night.
 - **No POS or payments.** "The loser's tab" is a ticket a human acts on, not an integration.
 - **No sound.** Every game is silent.
 - **No stats or leaderboards** for guests, and no analytics for staff beyond the open-ticket

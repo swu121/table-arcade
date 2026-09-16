@@ -8,6 +8,7 @@ import { Server } from 'socket.io'
 import { createRepos } from './db/index.js'
 import { init, reportClientError } from './handlers.js'
 import { pairHandler } from './pairing.js'
+import { gracefulShutdown } from './shutdown.js'
 import { loadVenues } from './venues.js'
 import { loadVersion } from './version.js'
 
@@ -30,12 +31,15 @@ const listed = await loadVenues(repos)
 if (repos.backend === 'postgres' && !(await repos.venues.list()).length) {
   console.warn('  no venues in the database yet — serving the demo venue. Run `npm run seed` to add yours.')
 }
-const { venues, roomFor } = init(io, { repos, venues: listed, version })
+const arcade = init(io, { repos, venues: listed, version })
+const { venues, roomFor } = arcade
 
+// A deploy is a SIGTERM and a wait (kill_timeout in fly.toml, 10s). Inside
+// that: every room is written down, every tablet is told, and the sockets are
+// closed so their reconnect loops start. The next boot picks the rooms back up.
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.once(signal, () => {
-    httpServer.close()
-    repos.close().finally(() => process.exit(0))
+    gracefulShutdown({ httpServer, io, app: arcade, repos, signal, timeout: 8000 })
   })
 }
 

@@ -9,6 +9,7 @@ export function createMemoryRepos() {
   const floorplans = new Map()
   const tickets = new Map() // slug -> Map<id, ticket>
   const devices = new Map() // id -> record, hash and all
+  const snapshots = new Map()
 
   const bucket = (slug) => {
     let map = tickets.get(slug)
@@ -44,6 +45,18 @@ export function createMemoryRepos() {
       all: () => [...devices.values()],
       put: (record) => devices.set(record.id, { ...record })
     }),
+    snapshots: {
+      async save(slug, snapshot) {
+        snapshots.set(slug, structuredClone(snapshot))
+      },
+      async load(slug) {
+        const snapshot = snapshots.get(slug)
+        return snapshot ? structuredClone(snapshot) : null
+      },
+      async clear(slug) {
+        snapshots.delete(slug)
+      }
+    },
 
     async close() {}
   }

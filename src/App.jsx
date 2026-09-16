@@ -117,6 +117,10 @@ function useToast() {
 function TabletApp() {
   const [sync, setSync] = useState(null)
   const [connected, setConnected] = useState(socket.connected)
+  // The server said it was going down on purpose. Nothing to do but wait for
+  // the reconnect loop — the table number is kept, the room comes back with
+  // the game still in it, and the banner says so instead of "reconnecting".
+  const [restarting, setRestarting] = useState(false)
   const [view, setView] = useState('home')
   const [wagerTarget, setWagerTarget] = useState(null)
   const [giftTarget, setGiftTarget] = useState(null)
@@ -146,11 +150,13 @@ function TabletApp() {
 
     const onConnect = () => {
       setConnected(true)
+      setRestarting(false)
       if (claimed.current) socket.emit('table:claim', { tableNumber: claimed.current })
       else socket.emit('state:hello')
     }
 
     const onDisconnect = () => setConnected(false)
+    const onRestarting = () => setRestarting(true)
 
     const onError = ({ code, message }) => {
       if (code === 'TAKEN_OVER') {
@@ -186,6 +192,7 @@ function TabletApp() {
 
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
+    socket.on('app:restarting', onRestarting)
     socket.on('state:sync', setSync)
     socket.on('app:error', onError)
     socket.on('challenge:ended', onChallengeEnded)
@@ -199,6 +206,7 @@ function TabletApp() {
     return () => {
       socket.off('connect', onConnect)
       socket.off('disconnect', onDisconnect)
+      socket.off('app:restarting', onRestarting)
       socket.off('state:sync', setSync)
       socket.off('app:error', onError)
       socket.off('challenge:ended', onChallengeEnded)
@@ -422,7 +430,7 @@ function TabletApp() {
         />
       )}
 
-      {!connected && <OfflineBanner />}
+      {(!connected || restarting) && <OfflineBanner label={restarting ? 'Restarting' : 'Reconnecting'} />}
       {toast && <Toast key={toast.id} toast={toast} />}
     </Shell>
   )

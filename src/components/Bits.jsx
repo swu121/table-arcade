@@ -134,10 +134,12 @@ export function Toast({ toast }) {
   )
 }
 
-export function OfflineBanner() {
+// The socket is gone. "Reconnecting" is the default; a server that said it was
+// going down on purpose gets "Restarting", so a deploy doesn't read as a fault.
+export function OfflineBanner({ label = 'Reconnecting' }) {
   return (
     <div className="fixed inset-x-0 top-0 z-50 bg-neon/90 py-1.5 text-center text-[0.7rem] font-bold tracking-[0.2em] text-[#2a0110] uppercase">
-      Reconnecting
+      {label}
     </div>
   )
 }

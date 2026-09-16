@@ -134,6 +134,35 @@ function contract(name, open, { skip = false } = {}) {
     assert.deepEqual(await repos.devices.list(north), [])
     assert.deepEqual((await repos.devices.list(south)).map((d) => d.id), [other.id])
   })
+
+  test(`${name}: a room snapshot is null until saved, comes back whole, and clears`, { skip }, async (t) => {
+    const repos = await open(t)
+    const slug = stamp()
+    await repos.venues.upsert(venue(slug))
+    assert.equal(await repos.snapshots.load(slug), null)
+
+    const snapshot = {
+      v: 1,
+      slug,
+      takenAt: Date.now(),
+      tables: [{ number: 4, signedIn: true, history: [], notifications: [], unread: { 5: 1 } }],
+      challenges: [{ id: 'ch_1', from: 4, to: 5, expiresIn: 12_000 }],
+      games: [{ id: 'g_1', type: 'connect4', players: [6, 12], state: { board: [[null, 6]] } }],
+      threads: [{ key: '4-5', messages: [{ id: 'm_1', from: 5, to: 4, text: 'hey', at: 1 }], readAt: { 5: 1 } }],
+      tickets: []
+    }
+    await repos.snapshots.save(slug, snapshot)
+    assert.deepEqual(await repos.snapshots.load(slug), snapshot)
+
+    // Saving again replaces, never accumulates.
+    await repos.snapshots.save(slug, { ...snapshot, games: [] })
+    assert.deepEqual((await repos.snapshots.load(slug)).games, [])
+
+    await repos.snapshots.clear(slug)
+    assert.equal(await repos.snapshots.load(slug), null)
+    // Clearing what isn't there is fine.
+    await repos.snapshots.clear(slug)
+  })
 }
 
 contract('memory', async (t) => {
