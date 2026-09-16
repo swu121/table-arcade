@@ -4,11 +4,16 @@ import { MENU, BOT_TABLES } from './state.js'
 // next one. It's a row in Postgres, or an entry in data/venues.json when there
 // is no database — either way, onboarding is "add a venue", never "deploy".
 //
-//   { slug, name, menu?, botTables? }
+//   { slug, name, menu?, botTables?, requirePairing? }
 //
-// Anything missing falls back to the demo defaults in state.js.
+// Anything missing falls back to the demo defaults in state.js. requirePairing
+// — whether a tablet needs a device token to connect — defaults to on in
+// production and off everywhere else, so the dev server and the tests never
+// have to pair.
 
 export const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/
+
+export const defaultRequirePairing = () => process.env.NODE_ENV === 'production'
 
 const DEFAULT_VENUES = [{ slug: 'demo', name: 'Table Arcade' }]
 
@@ -37,7 +42,8 @@ export function normalise(list) {
       menu: Array.isArray(entry.menu) && entry.menu.length ? entry.menu.map(menuItem).filter(Boolean) : MENU,
       botTables: Array.isArray(entry.botTables)
         ? entry.botTables.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n < 100)
-        : BOT_TABLES
+        : BOT_TABLES,
+      requirePairing: typeof entry.requirePairing === 'boolean' ? entry.requirePairing : defaultRequirePairing()
     })
   }
   return venues

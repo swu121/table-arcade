@@ -15,6 +15,7 @@ import { getGame, gameMenu, DEFAULT_GAME } from './games/index.js'
 import { createPlanStore } from './floorplan.js'
 import { createVenueRegistry, venueList } from './venues.js'
 import { createMemoryRepos } from './db/index.js'
+import { authenticate, broadcastDevices, createPairingStore, deviceList, kickDevice } from './pairing.js'
 
 const BOT_ACCEPT_DELAY = 1500
 
@@ -45,6 +46,8 @@ export function init(io, { repos = createMemoryRepos(), venues: list = null, ver
       repos
     })
     room.ready = hydrate(room)
+    // Live pairing codes for this venue, and nothing else: tokens go to repos.
+    room.pairing = createPairingStore()
     rooms.set(slug, room)
     // Handlers go on the venue's own namespace, not the dynamic parent: a
     // namespace made here before its first socket (a crash report, a startup
@@ -52,12 +55,17 @@ export function init(io, { repos = createMemoryRepos(), venues: list = null, ver
     //
     // Nobody's handlers attach until the room has its plan and open tickets
     // back, so the first tablet in after a restart sees the same board as the
-    // last one out.
-    nsp.use((_socket, next) => {
-      room.ready.then(() => next())
+    // last one out. Then the handshake is checked: a venue that requires
+    // pairing admits only a socket holding one of its device tokens (see
+    // pairing.js, including the temporary staff exemption).
+    nsp.use((socket, next) => {
+      room.ready
+        .then(() => authenticate(room, socket))
+        .then(() => next(), (error) => next(error))
     })
     nsp.on('connection', (socket) => {
       onConnection(room, socket)
+      if (socket.data.deviceId) broadcastDevices(room)
       // A tablet built from an older deploy reconnects to the new server just
       // fine, which is exactly the problem: it keeps running yesterday's code
       // until something makes it fetch today's. The client decides when.
@@ -1137,6 +1145,31 @@ function onConnection(room, socket) {
   socket.on('staff:join', () => {
     socket.join('staff')
     socket.emit('staff:sync', staffPayload(room))
+    deviceList(room)
+      .then((devices) => socket.emit('staff:devices', { devices }))
+      .catch((error) => console.warn(`pairing: could not list devices for ${room.venue.slug} —`, error.message))
+  })
+
+  // Pairing. Staff ask for a code and read it off their screen into the
+  // tablet; the tablet trades it for a token over HTTP (see pairing.js).
+  socket.on('staff:pairCode', () => {
+    socket.emit('staff:pairCode', room.pairing.create())
+  })
+
+  // Revoking a device drops any socket holding it on the spot. The id has to
+  // be one of this venue's, so a staff screen cannot reach into another room.
+  socket.on('staff:revokeDevice', async ({ id } = {}) => {
+    const deviceId = String(id ?? '')
+    try {
+      const devices = await room.repos.devices.list(room.venue.slug)
+      if (!devices.some((d) => d.id === deviceId)) return fail(socket, 'NO_DEVICE', 'That tablet is not paired here.')
+      await room.repos.devices.revoke(deviceId)
+    } catch (error) {
+      console.warn(`pairing: revoke failed for ${room.venue.slug} —`, error.message)
+      return fail(socket, 'REVOKE_FAILED', 'That tablet could not be revoked. Try again.')
+    }
+    kickDevice(room, deviceId)
+    broadcastDevices(room)
   })
 
   socket.on('staff:deliver', ({ ticketId } = {}) => {
@@ -1187,6 +1220,7 @@ function onConnection(room, socket) {
   })
 
   socket.on('disconnect', () => {
+    if (socket.data.deviceId) broadcastDevices(room)
     const number = socket.data.tableNumber
     if (!number) return
 

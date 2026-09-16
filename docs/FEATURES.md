@@ -13,6 +13,10 @@ This document covers what is actually built, from both sides of the room. Screen
 
 ## Claiming a tablet
 
+Before any of this, a tablet in a production venue has to be **paired**: opened at the venue's
+address, it shows a six-box code entry and nothing else until staff read a pairing code off
+their screen and type it in (see [Devices](#devices)). That happens once per tablet.
+
 A tablet with no table assigned shows a dead `00` and tells the guest to ask a server. Table
 numbers belong to staff, so the way into the assignment keypad is a deliberate **1.2 second
 press-and-hold** on the number, not a tap a guest can hit by accident.
@@ -215,7 +219,8 @@ games, reply to messages in character, and say thanks for a round.
 
 # Part 2 — The staff side
 
-The staff screen lives at `/staff` and has two tabs.
+The staff screen lives at `/staff` and has three tabs: tickets, the floor plan editor, and the
+venue's paired tablets.
 
 ## Tickets
 
@@ -264,6 +269,17 @@ reloads at its next idle moment, and busy ones wait. The staff screen that press
 If a tablet crashed on its own, the activity says so — `Tablet app crashed · <message>` — so the
 one staff are being asked about carries its own evidence.
 
+## Devices
+
+A new tablet cannot join a venue that requires pairing until staff let it in. **Pair a tablet**
+— in the floor plan editor's header, and on the Devices tab — asks the server for a six-digit
+code and shows it large with a countdown: it works once and lasts five minutes. On the tablet,
+the pairing screen (six boxes and the same keypad as table setup) takes the code and the tablet
+is in; it never has to be typed again. The **Devices** tab lists every paired tablet with its
+label, whether it is online, when it was paired and last seen, and a **Revoke** button behind a
+confirmation. Revoking drops the tablet's connection on the spot and sends it back to the
+pairing screen. See [Pairing](#pairing) for how it is enforced.
+
 ---
 
 # Part 3 — How it works
@@ -309,6 +325,37 @@ Handlers take the room as an explicit argument rather than reaching for module g
 nothing a tablet sends can address a table outside its own venue. Connecting to a namespace
 whose slug isn't a venue is refused at the handshake, and the client shows a "no such venue"
 screen instead of retrying.
+
+## Pairing
+
+A tablet is a device that can put items on a real tab, so the URL alone must not be enough to
+become one. Each guest tablet holds a **device token** — 32 random bytes, base64url — issued by
+that venue's staff and sent in the socket handshake (`auth: { token, version }`). The server
+stores only the token's SHA-256 (`devices`: `venue_id`, `token_hash`, `label`, `created_at`,
+`revoked_at`, `last_seen_at`; or `data/venues/<slug>/devices.json` without a database), so a
+copy of the data is not a way in. The per-namespace middleware in `roomFor` looks the token up
+after the room is hydrated; a missing, unknown, revoked or other-venue token gets
+`connect_error: Unauthorized`. The client treats that like "no such venue": it disconnects,
+clears the stale token, shows the pairing screen, and only reconnects once pairing succeeds.
+`last_seen_at` is refreshed on connect, at most once a minute per device.
+
+Tokens are minted by trading a **pairing code**: a six-digit, single-use code that lives in
+memory for five minutes in the room that issued it (`room.pairing`, never the database). Staff
+ask for one over the socket (`staff:pairCode`); the tablet posts it to
+`POST /api/venue/:slug/pair` with `{ code, label? }` and gets `{ token, deviceId }` back, and
+the code is burnt. Guesses are compared in constant time and limited to 10 a minute per IP and
+per room. `staff:revokeDevice` marks the row revoked, tells every socket holding that device
+(`device:revoked`) and disconnects it; the tablet lands on the pairing screen with the token
+gone.
+
+Enforcement is per venue: `requirePairing` in the venue row, defaulting to on in production and
+off otherwise, so `npm run dev` and the tests pair nothing. The tests that cover the enforced
+path (`server/pairing.test.js`) turn it on for their venue explicitly.
+
+**Temporary:** a handshake carrying `auth: { staff: true }` is admitted without a token. That
+is what the staff screen sends, and it means the staff URL is still open to anyone who has it.
+Staff login is the next piece of work and replaces this hook (`authenticate` in
+`server/pairing.js`).
 
 ## Builds, restarts and crashes
 
@@ -362,9 +409,9 @@ Which store is decided once at startup:
 The Postgres schema is versioned: `server/db/migrate.js` applies each `server/db/migrations/*.sql`
 once, in order, recording it in `schema_migrations`, under an advisory lock so two machines
 rolling at the same time cannot both create the tables. It runs at boot and as `npm run db:migrate`.
-The first migration also creates `devices` (`venue_id`, `token_hash`, `label`, `created_at`,
-`revoked_at`) and `staff_users` (`venue_id`, `email`, `password_hash`, …), unused today, so the
-auth work that follows only has to write handlers. `npm run seed` upserts the venues in
+The first migration also creates `devices` (paired tablets, see [Pairing](#pairing)) and
+`staff_users` (`venue_id`, `email`, `password_hash`, …), the latter unused until staff login
+lands; the second adds `devices.last_seen_at` and `venues.require_pairing`. `npm run seed` upserts the venues in
 `docs/venues.example.json` for a first deploy.
 
 The in-memory backend behind the tests has the same interface, so every test runs without a
@@ -381,6 +428,7 @@ and are skipped otherwise.
 | Menu and prices | 8 items | `server/state.js`, per venue in the venue store |
 | Message length / thread / inbox / history | 280 / 200 / 40 / 40 | `server/state.js` |
 | Reload loop guard | 3 reloads per 60s | `src/lib/reload.js` |
+| Pairing code life / guesses / last-seen writes | 5 min, once / 10 per min per IP and room / once per min | `server/pairing.js` |
 | Crash report rate | 5 per 60s per tablet | `src/lib/crash.js` |
 | Race count-in and ceiling | 3.2s / 120s | `server/games/race.js` |
 | Beer pong bot wobble | 0.11–0.2 | `server/games/beerpong.js` |
@@ -396,9 +444,10 @@ by omission:
 - **No database for the night itself.** A bar night is ephemeral; a restart wipes every live
   room. Only venues, floor plans and tickets persist (Postgres, or JSON on disk without one) —
   no game history, no chat archive.
-- **No accounts or auth.** Tables are identified by number. Anyone who reaches a venue's `/staff`
-  URL can run that floor, and anyone who knows a venue's slug can join it. The `devices` and
-  `staff_users` tables exist for this; nothing reads them yet.
+- **No staff login yet.** Tables are identified by number and tablets by a device token staff
+  issue when pairing, so a venue's slug alone no longer gets a tablet in. But anyone who reaches
+  a venue's `/staff` URL can still run that floor — and, for now, pair tablets. The
+  `staff_users` table exists for the login that closes this; nothing reads it yet.
 - **No POS or payments.** "The loser's tab" is a ticket a human acts on, not an integration.
 - **No sound.** Every game is silent.
 - **No stats or leaderboards** for guests, and no analytics for staff beyond the open-ticket
