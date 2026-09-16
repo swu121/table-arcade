@@ -226,6 +226,27 @@ the staff login, the staff ticket board, the floor plan editor and onboarding a 
 `/admin`, plus cross-venue isolation. Chromium is the only browser; install it once
 with `npx playwright install chromium`. The plan is in [`docs/plans/e2e.md`](docs/plans/e2e.md).
 
+## Putting it on a tablet
+
+The app installs from the browser. There is no store listing and no APK.
+
+On the tablet, open the venue's address in Chrome — `https://<app>.fly.dev/v/<slug>` — and
+choose **Install app** from the menu. It needs HTTPS, so this works against a deployment and
+not against `npm run dev` over the local network.
+
+Each venue serves its own manifest, so the installed icon carries that restaurant's name and
+opens that restaurant's address; two venues on one deployment install as two separate apps.
+The staff screen installs the same way from `/v/<slug>/staff`, as its own icon. A service
+worker keeps the app shell, so a reload during a wifi drop still brings up the room instead of
+the browser's error page — but nothing live is ever served from it. The socket, every API call
+and every page load go to the network first, because a tablet showing a stale room would be
+worse than one showing none.
+
+For a real floor, put a kiosk browser in front of it — Fully Kiosk Browser on Android, or
+Android's own Screen Pinning. That stops a guest leaving the app, relaunches it on boot, and
+gives you a way to restart a tablet whose browser has stopped answering. The staff screen's
+**Restart tablet** covers the page; a kiosk app covers the browser around it.
+
 ## Layout
 
 ```
@@ -236,6 +257,7 @@ server/
   pairing.js      pairing codes, the device-token handshake, POST /api/venue/:slug/pair
   staff.js        staff sessions, the staff handshake, /api/venue/:slug/staff/{login,logout,status}
   admin.js        the operator's session and /api/admin/*: venues created and edited live
+  manifest.js     one installable app per venue, named and started at itself
   ratelimit.js    the sliding-window limiter pairing and login share
   state.js        createRoom(): per-venue in-memory tables/games/tickets/chat
   snapshot.js     a room written down for a restart, and read back
@@ -248,13 +270,15 @@ scripts/
   seed.js         put docs/venues.example.json into Postgres on a first deploy
   staff-add.js    the first staff account for a venue
   admin-hash.js   a password hash for ADMIN_PASSWORD_HASH
+public/
+  sw.js           the service worker: live things stay live, the shell survives a wifi drop
 src/
   screens/        lobby, game host, per-game screens, result, staff, admin
   components/     board, chrome, icons
   styles/         Tailwind v4 theme and per-game CSS
 e2e/
   helpers.js      tablets as browser contexts, the staff sign-in, the hold-to-assign gesture
-  *.spec.js       routes, claim, challenge, chat, gift, floor plan, isolation, staff login, admin
+  *.spec.js       routes, claim, challenge, chat, gift, floor plan, isolation, staff login, admin, install
   serve.mjs       builds the client and starts the server for the suite
 ```
 

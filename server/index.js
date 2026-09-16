@@ -11,6 +11,7 @@ import { init, reportClientError } from './handlers.js'
 import { pairHandler } from './pairing.js'
 import { gracefulShutdown } from './shutdown.js'
 import { loginHandler, logoutHandler, statusHandler } from './staff.js'
+import { manifestHandler } from './manifest.js'
 import { loadVenues } from './venues.js'
 import { loadVersion } from './version.js'
 
@@ -72,6 +73,11 @@ app.get('/api/venue/:slug/staff/status', statusHandler({ roomFor }))
 // The bare URL is the single-venue demo: it lands on the first venue listed.
 // Vite serves the client in dev, so the client asks for this instead of being
 // redirected — the only route that has to work in both.
+// Each venue installs as its own app, under its own name, opening at its own
+// address. The static manifest in public/ stays as the bare URL's fallback.
+app.get('/v/:slug/manifest.webmanifest', manifestHandler({ venues }))
+app.get('/v/:slug/staff/manifest.webmanifest', manifestHandler({ venues, staff: true }))
+
 app.get('/api/venue', (_req, res) => {
   const venue = venues.default()
   res.json({ slug: venue.slug, name: venue.name })

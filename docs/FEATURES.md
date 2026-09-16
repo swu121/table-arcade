@@ -484,6 +484,34 @@ staff users admits a handshake with `auth.staff === 'dev'` as `{ id: 'dev', name
 **Continue (dev)**. It shuts the moment the venue has a user and never opens in production;
 the server tests use it, and `server/staff.test.js` covers both edges.
 
+## Installing on a tablet
+
+The tablet app installs from the browser: open the venue's address in Chrome and choose
+*Install app*. It needs HTTPS, so a deployment rather than the dev server over local wifi.
+
+The manifest is per venue, served at `/v/<slug>/manifest.webmanifest` from the venue row, so
+the icon carries that restaurant's name and opens that restaurant's address. `id` is what
+tells two installed apps apart, so a deployment hosting three restaurants puts three separate
+apps on three sets of tablets rather than three copies of whichever venue is listed first. The
+staff screen has its own manifest beside it, labelled so the two icons are tellable apart on
+one home screen. The static manifest in `public/` stays as the bare URL's fallback, and an
+archived venue serves none.
+
+The service worker (`public/sw.js`) is registered as `/sw.js?v=<build>`, so a deploy is a new
+script to the browser rather than the same bytes. It exists for two reasons: without one the
+browser offers a bookmark instead of an install, and without one a reload during a wifi drop
+is the browser's error page for the rest of the shift. What it does *not* do is serve anything
+live. The socket and every `/api/` call are never intercepted, and a page load goes to the
+network first so a deploy is picked up and the version handshake is never arguing with a
+cached page; the cache answers only when the network cannot. Hashed assets and fonts are
+served cache-first, since their URLs never change contents, and a version's cache is dropped
+whole when the next one activates.
+
+None of this stops a guest swiping out of the app. That is a kiosk browser's job — Fully Kiosk
+Browser on Android, or Screen Pinning — which also relaunches the app on boot and can restart a
+tablet whose browser has stopped answering. The staff screen's *Restart tablet* handles the
+page; a hung browser is outside anything the page can do (see below).
+
 ## Builds, restarts and crashes
 
 Tablets sit open for days and only ever run the code they loaded, so a deploy on its own
@@ -618,6 +646,9 @@ by omission:
   staff — no second operator, and no password reset anywhere: a forgotten staff password is a
   revoke and a new account, and a forgotten operator password is a new `ADMIN_PASSWORD_HASH`.
   Both kinds of session live in memory, so a deploy signs everyone out.
+- **No offline play.** The service worker keeps the app shell so a reload survives a wifi drop,
+  but every challenge, move and ticket is the server's call. A tablet with no network shows
+  *Reconnecting* and waits; it never plays on alone and reconciles later.
 - **No POS or payments.** "The loser's tab" is a ticket a human acts on, not an integration.
 - **No sound.** Every game is silent.
 - **No stats or leaderboards** for guests, and no analytics for staff beyond the open-ticket

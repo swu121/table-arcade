@@ -38,7 +38,10 @@ export default defineConfig(({ command }) => {
       port: 5173,
       proxy: {
         '/socket.io': { target: 'http://localhost:3000', ws: true },
-        '/api': { target: 'http://localhost:3000' }
+        '/api': { target: 'http://localhost:3000' },
+        // Per-venue manifests come from the server; everything else under /v/
+        // is the client's own routing and must stay with Vite.
+        '^/v/[^/]+/(staff/)?manifest\\.webmanifest$': { target: 'http://localhost:3000' }
       }
     },
     build: {
