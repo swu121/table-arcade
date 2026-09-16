@@ -59,8 +59,8 @@ delivered" button, with a running total of what's sitting on tabs.
 ![The floor plan editor](docs/screenshots/staff-floor-plan.png)
 
 **Floor plan** — a drag-and-drop editor for the room layout. Tables get dragged, resized,
-renumbered and reshaped; edits save to `data/floorplan.json` and push live to every connected
-tablet. Selecting a table shows its tab and its activity, and clearing it for the next party
+renumbered and reshaped; edits save to `data/venues/<slug>/floorplan.json` and push live to every
+connected tablet in that venue. Selecting a table shows its tab and its activity, and clearing it for the next party
 takes a confirmation listing what's about to go.
 
 ## How it fits together
@@ -82,8 +82,26 @@ Two modes exist: `turn` (Connect 4, Beer Pong) and `race` (Soju Run, Stacker), w
 tables play at once against a shared seeded course. The seed means both tablets render an
 identical run without streaming any geometry between them.
 
-State lives in memory. There's no database and no auth — this is a pitch demo, and stopping
-the process wipes the room. The floor plan is the one exception, and persists to disk.
+## Venues
+
+One server runs any number of restaurants. Each is a **venue** with its own slug, name, menu,
+bot tables and floor plan, listed in `data/venues.json` (see
+[`docs/venues.example.json`](docs/venues.example.json)). Onboarding a restaurant is adding an
+entry there; nothing gets deployed.
+
+- Guest tablets — `/v/<slug>`
+- Staff — `/v/<slug>/staff`
+- The bare URL sends you to the first venue listed, so the single-venue demo still works.
+
+Every venue is its own socket.io namespace and its own in-memory room (`server/state.js`,
+`createRoom`). A tablet only ever holds a connection into one namespace, and every handler
+resolves tables, challenges, games, tickets and chat threads from that one room — so a table in
+one restaurant cannot see, message, challenge or be billed by a table in another, by
+construction rather than by a check. `server/rooms.test.js` proves it.
+
+Live state lives in memory. There's no database and no auth yet, and stopping the process
+wipes every room. Venue config and floor plans are the exception, and persist under `data/`
+(or `DATA_DIR`).
 
 ## Running it
 
@@ -92,10 +110,10 @@ npm install
 npm run dev
 ```
 
-- Guest tablets — `http://localhost:5173`
-- Staff — `http://localhost:5173/staff`
+- Guest tablets — `http://localhost:5173/v/demo`
+- Staff — `http://localhost:5173/v/demo/staff`
 
-`npm run dev` prints a LAN address too, which is what the tablets actually point at.
+`npm run dev` prints every venue with a LAN address, which is what the tablets actually point at.
 
 ```sh
 npm test            # server-side game rules
@@ -108,9 +126,11 @@ npm start           # serve the built client from the node server
 ```
 server/
   index.js        http + socket.io entry
-  handlers.js     lobby, challenges, games, tickets
-  state.js        in-memory tables/games/tickets, menu, bot tables
-  floorplan.js    load, validate and persist the room layout
+  venues.js       the venue list: slug, name, menu, bot tables
+  handlers.js     lobby, challenges, games, tickets — one room per venue
+  state.js        createRoom(): per-venue in-memory tables/games/tickets/chat
+  floorplan.js    per-venue layout store: load, validate, persist
+  rooms.test.js   two venues on one server can't reach each other
   games/          one module per game, plus rng + shared race logic
 src/
   screens/        lobby, game host, per-game screens, result, staff

@@ -5,6 +5,7 @@ dist
 .env
 .fly
 
-# Runtime state: the server falls back to defaultPlan() when this is absent.
+# Runtime state: venues.json (falls back to the single demo venue) and per-venue
+# floor plans (fall back to defaultPlan()).
 data/
 .playwright-mcp

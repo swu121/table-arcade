@@ -1,0 +1,7 @@
+[
+  { "slug": "demo", "name": "Table Arcade" },
+  { "slug": "soju-house", "name": "Soju House", "botTables": [3, 9], "menu": [
+    { "id": "soju", "name": "Soju Bottle", "price": 14, "icon": "shot" },
+    { "id": "kimchi-fries", "name": "Kimchi Fries", "price": 11, "icon": "fries" }
+  ] }
+]

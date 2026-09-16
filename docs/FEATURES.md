@@ -234,7 +234,7 @@ be renumbered, switched between round and rectangular, and given a seat count th
 chairs drawn around them. Fixtures cover the bar, kitchen, entrance, restrooms and plain walls.
 
 Edits are local until saved, with an unsaved-changes marker and a save that refuses to run
-while two tables share a number. Saving writes `data/floorplan.json` and pushes the new plan
+while two tables share a number. Saving writes `data/venues/<slug>/floorplan.json` and pushes the new plan
 live to every connected tablet. There is a reset to the default 21-table plan.
 
 ## Table inspector
@@ -283,12 +283,25 @@ each.
 Both tablets in a race build their course from the same seed, so they render an identical run
 without streaming any geometry between them. The seed is the only thing that crosses the wire.
 
+## Venues
+
+The server hosts many restaurants at once. `data/venues.json` lists them; each entry is
+`{ slug, name, menu?, botTables? }`, with the demo defaults filling anything left out. Tablets
+load `/v/<slug>`, staff load `/v/<slug>/staff`, and the bare URL redirects to the first venue.
+
+Each venue is a socket.io namespace (`/venue/<slug>`) and a *room*: one `createRoom()` call in
+`server/state.js` that owns that venue's tables, challenges, games, tickets and conversations.
+Handlers take the room as an explicit argument rather than reaching for module globals, so
+nothing a tablet sends can address a table outside its own venue. Connecting to a namespace
+whose slug isn't a venue is refused at the handshake, and the client shows a "no such venue"
+screen instead of retrying.
+
 ## State
 
-Everything except the floor plan lives in memory: tables, challenges, games, tickets and
-conversations. Stopping the process wipes the room. The floor plan is the exception and
-persists to `data/floorplan.json`, validated and clamped on load, falling back to the default
-plan if the file is missing or malformed.
+Everything except venue config and floor plans lives in memory, per room. Stopping the process
+wipes every room. Floor plans persist to `data/venues/<slug>/floorplan.json`, validated and
+clamped on load, falling back to the default plan if the file is missing or malformed. Set
+`DATA_DIR` to move the data directory (on Fly, point it at a volume).
 
 ## Tunables
 
@@ -296,8 +309,8 @@ plan if the file is missing or malformed.
 | --- | --- | --- |
 | Challenge expiry | 30s | `server/state.js` |
 | Reconnect grace | 60s | `server/state.js` |
-| Bot tables | 12, 17, 20 | `server/state.js` |
-| Menu and prices | 8 items | `server/state.js` |
+| Bot tables | 12, 17, 20 | `server/state.js`, per venue in `data/venues.json` |
+| Menu and prices | 8 items | `server/state.js`, per venue in `data/venues.json` |
 | Message length / thread / inbox / history | 280 / 200 / 40 / 40 | `server/state.js` |
 | Race count-in and ceiling | 3.2s / 120s | `server/games/race.js` |
 | Beer pong bot wobble | 0.11–0.2 | `server/games/beerpong.js` |
@@ -310,9 +323,10 @@ plan if the file is missing or malformed.
 This is a demo for pitching bar owners, not a pilot. The following are missing on purpose, not
 by omission:
 
-- **No database.** A bar night is ephemeral; a restart wipes the room.
-- **No accounts or auth.** Tables are identified by number. Anyone who reaches `/staff` can run
-  the floor.
+- **No database.** A bar night is ephemeral; a restart wipes every room. Venues and floor plans
+  are JSON on disk.
+- **No accounts or auth.** Tables are identified by number. Anyone who reaches a venue's `/staff`
+  URL can run that floor, and anyone who knows a venue's slug can join it.
 - **No POS or payments.** "The loser's tab" is a ticket a human acts on, not an integration.
 - **No sound.** Every game is silent.
 - **No stats or leaderboards** for guests, and no analytics for staff beyond the open-ticket

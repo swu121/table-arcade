@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { socket, TABLE_KEY } from './socket.js'
+import { route, redirectToDefault } from './venue.js'
 import { useWakeLock } from './useWakeLock.js'
 import { Backdrop, OfflineBanner, Toast } from './components/Bits.jsx'
 import { Mark, Wordmark } from './components/Logo.jsx'
@@ -31,15 +32,46 @@ function Shell({ children }) {
   )
 }
 
-function Booting() {
+function Booting({ label = 'Connecting' }) {
   return (
     <div className="relative z-10 grid h-full place-items-center">
       <div className="anim-fade-in flex flex-col items-center gap-5">
         <Mark size={56} />
-        <div className="overline">Connecting</div>
+        <div className="overline">{label}</div>
       </div>
     </div>
   )
+}
+
+function NoVenue({ slug }) {
+  return (
+    <div className="relative z-10 grid h-full place-items-center">
+      <div className="anim-fade-in flex max-w-md flex-col items-center gap-4 text-center">
+        <Mark size={56} />
+        <div className="overline">No such venue</div>
+        <p className="text-dim">
+          Nothing is set up at <span className="font-mono text-chalk">/v/{slug}</span>. Check the address
+          the tablet was given, or ask whoever runs the room.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// The server refuses the namespace outright when the slug isn't a venue, which
+// surfaces as a connect error rather than a message — and it would retry forever.
+function useVenueGate() {
+  const [missing, setMissing] = useState(false)
+  useEffect(() => {
+    const onError = (error) => {
+      if (error?.message !== 'Invalid namespace') return
+      socket.disconnect()
+      setMissing(true)
+    }
+    socket.on('connect_error', onError)
+    return () => socket.off('connect_error', onError)
+  }, [])
+  return missing
 }
 
 function useToast() {
@@ -426,6 +458,25 @@ function StaffApp() {
 }
 
 export default function App() {
-  const isStaff = window.location.pathname.replace(/\/+$/, '') === '/staff'
-  return isStaff ? <StaffApp /> : <TabletApp />
+  const missing = useVenueGate()
+
+  useEffect(() => {
+    if (!route.slug) redirectToDefault(route.staff).catch(console.error)
+  }, [])
+
+  if (!route.slug) {
+    return (
+      <Shell>
+        <Booting label="Finding the room" />
+      </Shell>
+    )
+  }
+  if (missing) {
+    return (
+      <Shell>
+        <NoVenue slug={route.slug} />
+      </Shell>
+    )
+  }
+  return route.staff ? <StaffApp /> : <TabletApp />
 }

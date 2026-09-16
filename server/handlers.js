@@ -1,34 +1,61 @@
 import {
-  MENU,
   CHALLENGE_TTL,
   RECONNECT_GRACE,
   MAX_MESSAGE,
   MAX_THREAD,
   MAX_NOTIFICATIONS,
   MAX_HISTORY,
-  tables,
-  challenges,
-  games,
-  tickets,
-  conversations,
+  createRoom,
   getThread,
   hasThread,
   nextId,
-  makeTable,
-  seedBots
+  makeTable
 } from './state.js'
 import { getGame, gameMenu, DEFAULT_GAME } from './games/index.js'
-import { getPlan, savePlan, resetPlan } from './floorplan.js'
+import { createPlanStore } from './floorplan.js'
+import { createVenueRegistry, loadVenues, normalise } from './venues.js'
+import path from 'node:path'
 
 const BOT_ACCEPT_DELAY = 1500
 
-let io = null
+// Every venue gets its own socket.io namespace, /venue/<slug>. A socket joins
+// exactly one, and every handler below resolves its room from that namespace,
+// so a tablet in one restaurant has no handle on another restaurant at all.
+export const NAMESPACE = /^\/venue\/([a-z0-9-]+)$/
 
-export function init(server) {
-  io = server
-  seedBots()
-  io.on('connection', onConnection)
-  setInterval(sweep, 10_000).unref()
+export function init(io, { dataDir = null, venues: list = null } = {}) {
+  const venues = createVenueRegistry(list ? normalise(list) : loadVenues(dataDir))
+  const rooms = new Map()
+
+  function roomFor(slug) {
+    let room = rooms.get(slug)
+    if (room) return room
+    const venue = venues.get(slug)
+    if (!venue) return null
+    room = createRoom({
+      venue,
+      nsp: io.of(`/venue/${slug}`),
+      plans: createPlanStore(dataDir ? path.join(dataDir, 'venues', slug, 'floorplan.json') : null)
+    })
+    rooms.set(slug, room)
+    return room
+  }
+
+  const parent = io.of((name, _auth, next) => {
+    const slug = name.match(NAMESPACE)?.[1]
+    next(null, Boolean(slug && venues.get(slug)))
+  })
+
+  parent.on('connection', (socket) => {
+    const room = roomFor(socket.nsp.name.match(NAMESPACE)[1])
+    if (!room) return socket.disconnect(true)
+    onConnection(room, socket)
+  })
+
+  const sweeper = setInterval(() => rooms.forEach(sweep), 10_000)
+  sweeper.unref()
+
+  return { venues, roomFor, rooms, stop: () => clearInterval(sweeper) }
 }
 
 /* ---------------------------------------------------------------- sync --- */
@@ -43,13 +70,13 @@ function isOnline(table) {
   return table.isBot || (table.socketId !== null && table.signedIn)
 }
 
-function recomputeStatus(table) {
-  if (table.gameId && games.has(table.gameId)) {
+function recomputeStatus(room, table) {
+  if (table.gameId && room.games.has(table.gameId)) {
     table.status = 'playing'
     return
   }
-  if (table.challengeId && challenges.has(table.challengeId)) {
-    const challenge = challenges.get(table.challengeId)
+  if (table.challengeId && room.challenges.has(table.challengeId)) {
+    const challenge = room.challenges.get(table.challengeId)
     table.status = challenge.from === table.number ? 'challenging' : 'challenged'
     return
   }
@@ -75,13 +102,13 @@ function gameView(game, me) {
   }
 }
 
-function lobbyFor(me) {
-  return [...tables.values()]
+function lobbyFor(room, me) {
+  return [...room.tables.values()]
     .filter((t) => t.number !== me && t.status !== 'gone')
     .sort((a, b) => a.number - b.number)
     // `known` is whether the two tables share a thread yet. On the floor plan
     // that decides whether a tap opens the conversation or starts a challenge.
-    .map((t) => ({ number: t.number, status: t.status, known: me !== null && hasThread(me, t.number) }))
+    .map((t) => ({ number: t.number, status: t.status, known: me !== null && hasThread(room, me, t.number) }))
 }
 
 // Only the counts and flags ride along on every sync. Message bodies travel
@@ -96,17 +123,25 @@ function socialFor(table) {
   }
 }
 
-function takenNumbers() {
-  return [...tables.values()].filter(isBound).map((t) => t.number)
+function takenNumbers(room) {
+  return [...room.tables.values()].filter(isBound).map((t) => t.number)
 }
 
-function buildSync(table) {
-  const base = { menu: MENU, games: gameMenu(), floorplan: getPlan(), taken: takenNumbers() }
+const venueInfo = (room) => ({ slug: room.venue.slug, name: room.venue.name })
+
+function buildSync(room, table) {
+  const base = {
+    venue: venueInfo(room),
+    menu: room.venue.menu,
+    games: gameMenu(),
+    floorplan: room.plans.get(),
+    taken: takenNumbers(room)
+  }
   if (!table) {
     return {
       ...base,
       self: null,
-      lobby: lobbyFor(null),
+      lobby: lobbyFor(room, null),
       challenge: null,
       game: null,
       lastResult: null,
@@ -114,13 +149,13 @@ function buildSync(table) {
     }
   }
 
-  const challenge = table.challengeId ? challenges.get(table.challengeId) : null
-  const game = table.gameId ? games.get(table.gameId) : null
+  const challenge = table.challengeId ? room.challenges.get(table.challengeId) : null
+  const game = table.gameId ? room.games.get(table.gameId) : null
 
   return {
     ...base,
     self: { number: table.number, status: table.status, signedIn: table.signedIn },
-    lobby: lobbyFor(table.number),
+    lobby: lobbyFor(room, table.number),
     challenge: challenge
       ? {
           id: challenge.id,
@@ -138,21 +173,21 @@ function buildSync(table) {
   }
 }
 
-function syncAll() {
-  for (const socket of io.sockets.sockets.values()) {
+function syncAll(room) {
+  for (const socket of room.nsp.sockets.values()) {
     const number = socket.data.tableNumber
-    const table = number ? tables.get(number) : null
-    socket.emit('state:sync', buildSync(table && table.socketId === socket.id ? table : null))
+    const table = number ? room.tables.get(number) : null
+    socket.emit('state:sync', buildSync(room, table && table.socketId === socket.id ? table : null))
   }
-  syncStaff()
+  syncStaff(room)
 }
 
-function ticketList() {
-  return [...tickets.values()].sort((a, b) => b.createdAt - a.createdAt)
+function ticketList(room) {
+  return [...room.tickets.values()].sort((a, b) => b.createdAt - a.createdAt)
 }
 
-function floorList() {
-  return [...tables.values()]
+function floorList(room) {
+  return [...room.tables.values()]
     .sort((a, b) => a.number - b.number)
     .map((t) => ({
       number: t.number,
@@ -163,10 +198,15 @@ function floorList() {
     }))
 }
 
-const staffPayload = () => ({ tickets: ticketList(), floorplan: getPlan(), floor: floorList() })
+const staffPayload = (room) => ({
+  venue: venueInfo(room),
+  tickets: ticketList(room),
+  floorplan: room.plans.get(),
+  floor: floorList(room)
+})
 
-function syncStaff() {
-  io.to('staff').emit('staff:sync', staffPayload())
+function syncStaff(room) {
+  room.nsp.to('staff').emit('staff:sync', staffPayload(room))
 }
 
 // Chat never lands here — staff get the table's actions, not its conversations.
@@ -176,9 +216,9 @@ function log(table, entry) {
   if (table.history.length > MAX_HISTORY) table.history.length = MAX_HISTORY
 }
 
-function socketFor(table) {
+function socketFor(room, table) {
   if (!table?.socketId) return null
-  return io.sockets.sockets.get(table.socketId) ?? null
+  return room.nsp.sockets.get(table.socketId) ?? null
 }
 
 function fail(socket, code, message) {
@@ -194,35 +234,35 @@ function clearChallengeTimer(challenge) {
   }
 }
 
-function detachChallenge(challenge) {
+function detachChallenge(room, challenge) {
   clearChallengeTimer(challenge)
-  challenges.delete(challenge.id)
+  room.challenges.delete(challenge.id)
   for (const number of [challenge.from, challenge.to]) {
-    const table = tables.get(number)
+    const table = room.tables.get(number)
     if (table?.challengeId === challenge.id) {
       table.challengeId = null
-      recomputeStatus(table)
+      recomputeStatus(room, table)
     }
   }
 }
 
-function cancelChallenge(challenge, reason) {
+function cancelChallenge(room, challenge, reason) {
   if (!challenge || challenge.status !== 'pending') return
   challenge.status = reason
-  detachChallenge(challenge)
+  detachChallenge(room, challenge)
 
   // Who the ending is attributed to: the challenged table for a decline or a
   // timeout, the challenger for a cancel. A drop names whoever went.
   const line = ENDED_NOTE[reason]
   if (line) {
     const by = reason === 'cancelled' ? challenge.from : reason === 'disconnected' ? challenge.goneTable ?? challenge.to : challenge.to
-    note(challenge.from, challenge.to, 'challengeEnded', line(by, challenge.item.name))
+    note(room, challenge.from, challenge.to, 'challengeEnded', line(by, challenge.item.name))
   }
 
   for (const number of [challenge.from, challenge.to]) {
     const other = number === challenge.from ? challenge.to : challenge.from
-    log(tables.get(number), { kind: 'challengeEnded', otherTable: other, reason })
-    const socket = socketFor(tables.get(number))
+    log(room.tables.get(number), { kind: 'challengeEnded', otherTable: other, reason })
+    const socket = socketFor(room, room.tables.get(number))
     if (socket) {
       socket.emit('challenge:ended', {
         reason,
@@ -256,17 +296,17 @@ function cleanMessage(raw) {
   return points.length > MAX_MESSAGE ? points.slice(0, MAX_MESSAGE).join('') : collapsed
 }
 
-function pushThread(table, otherNumber) {
-  const thread = getThread(table.number, otherNumber)
-  socketFor(table)?.emit('chat:thread', {
+function pushThread(room, table, otherNumber) {
+  const thread = getThread(room, table.number, otherNumber)
+  socketFor(room, table)?.emit('chat:thread', {
     withTable: otherNumber,
     messages: thread.messages,
     readAt: thread.readAt[otherNumber] ?? 0
   })
 }
 
-function appendMessage(from, to, text, delivered) {
-  const thread = getThread(from, to)
+function appendMessage(room, from, to, text, delivered) {
+  const thread = getThread(room, from, to)
   thread.messages.push({
     id: nextId('m'),
     from,
@@ -283,16 +323,16 @@ function appendMessage(from, to, text, delivered) {
 // A line in the thread that neither table wrote: the room noting what happened
 // between them. It has no recipient, so it never counts as unread or undelivered,
 // and both ends get the thread again so an open chat shows it land.
-function note(a, b, kind, text, extra = {}) {
-  const thread = getThread(a, b)
+function note(room, a, b, kind, text, extra = {}) {
+  const thread = getThread(room, a, b)
   thread.messages.push({ id: nextId('m'), from: null, to: null, system: true, kind, text, at: Date.now(), ...extra })
   if (thread.messages.length > MAX_THREAD) {
     thread.messages.splice(0, thread.messages.length - MAX_THREAD)
   }
-  const ta = tables.get(a)
-  const tb = tables.get(b)
-  if (ta) pushThread(ta, b)
-  if (tb) pushThread(tb, a)
+  const ta = room.tables.get(a)
+  const tb = room.tables.get(b)
+  if (ta) pushThread(room, ta, b)
+  if (tb) pushThread(room, tb, a)
 }
 
 const ENDED_NOTE = {
@@ -304,11 +344,11 @@ const ENDED_NOTE = {
 
 // A table that reconnects after a drop has to collect everything that piled up
 // while its socket was gone, otherwise those messages read "Sent" forever.
-function flushDeliveries(table) {
+function flushDeliveries(room, table) {
   const now = Date.now()
   const partners = new Set()
 
-  for (const thread of conversations.values()) {
+  for (const thread of room.conversations.values()) {
     for (const message of thread.messages) {
       if (message.to === table.number && !message.deliveredAt) {
         message.deliveredAt = now
@@ -318,13 +358,13 @@ function flushDeliveries(table) {
   }
 
   for (const other of partners) {
-    const sender = tables.get(other)
-    if (sender) pushThread(sender, table.number)
+    const sender = room.tables.get(other)
+    if (sender) pushThread(room, sender, table.number)
   }
 }
 
-function markRead(table, otherNumber) {
-  getThread(table.number, otherNumber).readAt[table.number] = Date.now()
+function markRead(room, table, otherNumber) {
+  getThread(room, table.number, otherNumber).readAt[table.number] = Date.now()
 
   let changed = Boolean(table.unread[otherNumber])
   delete table.unread[otherNumber]
@@ -337,42 +377,42 @@ function markRead(table, otherNumber) {
   return changed
 }
 
-function deliverMessage(from, target, body) {
-  appendMessage(from.number, target.number, body, Boolean(socketFor(target)) || target.isBot)
+function deliverMessage(room, from, target, body) {
+  appendMessage(room, from.number, target.number, body, Boolean(socketFor(room, target)) || target.isBot)
 
   if (target.viewing === from.number) {
-    markRead(target, from.number)
+    markRead(room, target, from.number)
   } else if (!target.muted.includes(from.number)) {
     // Muting silences the alert but not the conversation: the message still lands
     // in the thread, it just never badges the inbox or raises a toast.
     target.unread[from.number] = (target.unread[from.number] ?? 0) + 1
     notify(target, { kind: 'message', fromTable: from.number, preview: body })
-    socketFor(target)?.emit('chat:ping', { fromTable: from.number, preview: body })
+    socketFor(room, target)?.emit('chat:ping', { fromTable: from.number, preview: body })
   }
 
-  pushThread(from, target.number)
-  pushThread(target, from.number)
+  pushThread(room, from, target.number)
+  pushThread(room, target, from.number)
 }
 
 // A table turning over. Nothing the last party said, ordered or played should
 // follow them out the door and greet whoever sits down next.
-function wipeTable(table) {
-  if (table.challengeId) cancelChallenge(challenges.get(table.challengeId), 'cancelled')
+function wipeTable(room, table) {
+  if (table.challengeId) cancelChallenge(room, room.challenges.get(table.challengeId), 'cancelled')
   if (table.gameId) {
-    const game = games.get(table.gameId)
-    if (game) voidGame(game)
+    const game = room.games.get(table.gameId)
+    if (game) voidGame(room, game)
   }
 
   const partners = new Set()
-  for (const [key, thread] of conversations) {
+  for (const [key, thread] of room.conversations) {
     const pair = key.split('-').map(Number)
     if (!pair.includes(table.number)) continue
-    conversations.delete(key)
+    room.conversations.delete(key)
     if (thread.messages.length) partners.add(pair.find((n) => n !== table.number))
   }
 
-  for (const [id, ticket] of tickets) {
-    if (ticket.owingTable === table.number || ticket.owedToTable === table.number) tickets.delete(id)
+  for (const [id, ticket] of room.tickets) {
+    if (ticket.owingTable === table.number || ticket.owedToTable === table.number) room.tickets.delete(id)
   }
 
   table.history = []
@@ -386,19 +426,19 @@ function wipeTable(table) {
   // screen and the table goes dark until the next one sits down.
   table.signedIn = false
   table.seatedAt = null
-  recomputeStatus(table)
+  recomputeStatus(room, table)
 
   // The other end of every wiped thread is still holding its own copy, and its
   // inbox still quotes messages that no longer exist anywhere.
   for (const other of partners) {
-    pushThread(table, other)
-    const partner = tables.get(other)
+    pushThread(room, table, other)
+    const partner = room.tables.get(other)
     if (!partner) continue
     delete partner.unread[table.number]
     partner.notifications = partner.notifications.filter(
       (entry) => !(entry.kind === 'message' && entry.fromTable === table.number)
     )
-    pushThread(partner, table.number)
+    pushThread(room, partner, table.number)
   }
 }
 
@@ -406,31 +446,31 @@ function wipeTable(table) {
 
 // Everything a game module is allowed to reach for: who's a bot, a timer that
 // dies with the game, a way to submit an action, and a way to call it.
-function contextFor(game) {
+function contextFor(room, game) {
   return {
-    isBot: (number) => tables.get(number)?.isBot === true,
+    isBot: (number) => room.tables.get(number)?.isBot === true,
 
     after(ms, fn) {
       const handle = setTimeout(() => {
-        if (games.get(game.id) !== game || game.status !== 'active') return
+        if (room.games.get(game.id) !== game || game.status !== 'active') return
         fn()
       }, ms)
       handle.unref?.()
     },
 
     act(number, payload) {
-      if (applyAction(number, game.id, payload)) syncAll()
+      if (applyAction(room, number, game.id, payload)) syncAll(room)
     },
 
     finish(ended) {
-      if (games.get(game.id) !== game || game.status !== 'active') return
-      endGame(game, ended.winner, ended.reason)
-      syncAll()
+      if (room.games.get(game.id) !== game || game.status !== 'active') return
+      endGame(room, game, ended.winner, ended.reason)
+      syncAll(room)
     }
   }
 }
 
-function startGame(challenge) {
+function startGame(room, challenge) {
   const mod = getGame(challenge.gameType) ?? getGame(DEFAULT_GAME)
   const players = [challenge.from, challenge.to]
 
@@ -447,11 +487,11 @@ function startGame(challenge) {
     // The challenged table moves first — small fairness offset for being called out.
     state: mod.create({ players, first: challenge.to })
   }
-  game.ctx = contextFor(game)
-  games.set(game.id, game)
+  game.ctx = contextFor(room, game)
+  room.games.set(game.id, game)
 
   for (const number of players) {
-    const table = tables.get(number)
+    const table = room.tables.get(number)
     if (!table) continue
     table.challengeId = null
     table.gameId = game.id
@@ -465,13 +505,13 @@ function startGame(challenge) {
     })
   }
 
-  note(players[0], players[1], 'gameStart', `Game on — ${mod.name} for ${game.item.name}.`)
+  note(room, players[0], players[1], 'gameStart', `Game on — ${mod.name} for ${game.item.name}.`)
 
   mod.tick?.(game, game.ctx)
   return game
 }
 
-function endGame(game, winner, reason) {
+function endGame(room, game, winner, reason) {
   game.status = 'complete'
   game.winner = winner
 
@@ -491,11 +531,11 @@ function endGame(game, winner, reason) {
       gameName: mod.name,
       reason
     }
-    tickets.set(ticket.id, ticket)
+    room.tickets.set(ticket.id, ticket)
   }
 
   for (const number of game.players) {
-    const table = tables.get(number)
+    const table = room.tables.get(number)
     if (!table) continue
     table.gameId = null
     table.lastResult = {
@@ -507,14 +547,14 @@ function endGame(game, winner, reason) {
       reason,
       ticketId: ticket?.id ?? null
     }
-    recomputeStatus(table)
+    recomputeStatus(room, table)
     log(table, { kind: 'result', ...table.lastResult })
-    socketFor(table)?.emit('game:over', table.lastResult)
+    socketFor(room, table)?.emit('game:over', table.lastResult)
   }
 
   const [a, b] = game.players
   if (winner === null) {
-    note(a, b, 'result', `${mod.name} ended in a draw. Nobody pays for the ${game.item.name}.`, { winner: null })
+    note(room, a, b, 'result', `${mod.name} ended in a draw. Nobody pays for the ${game.item.name}.`, { winner: null })
   } else {
     const loser = game.players.find((p) => p !== winner)
     const how =
@@ -523,27 +563,27 @@ function endGame(game, winner, reason) {
         : reason === 'forfeit'
           ? `Table ${loser} never came back to ${mod.name}.`
           : `Table ${winner} beat Table ${loser} at ${mod.name}.`
-    note(a, b, 'result', `${how} ${game.item.name} is on Table ${loser}.`, { winner })
+    note(room, a, b, 'result', `${how} ${game.item.name} is on Table ${loser}.`, { winner })
   }
 
-  games.delete(game.id)
-  syncStaff()
+  room.games.delete(game.id)
+  syncStaff(room)
 }
 
-function voidGame(game) {
+function voidGame(room, game) {
   game.status = 'void'
-  note(game.players[0], game.players[1], 'challengeEnded', `The ${getGame(game.type).name} game was called off.`)
+  note(room, game.players[0], game.players[1], 'challengeEnded', `The ${getGame(game.type).name} game was called off.`)
   for (const number of game.players) {
-    const table = tables.get(number)
+    const table = room.tables.get(number)
     if (!table) continue
     table.gameId = null
-    recomputeStatus(table)
+    recomputeStatus(room, table)
   }
-  games.delete(game.id)
+  room.games.delete(game.id)
 }
 
-function applyAction(tableNumber, gameId, payload) {
-  const game = games.get(gameId)
+function applyAction(room, tableNumber, gameId, payload) {
+  const game = room.games.get(gameId)
   if (!game || game.status !== 'active') return false
   if (!game.players.includes(tableNumber)) return false
   if (game.goneTable !== null) return false
@@ -553,7 +593,7 @@ function applyAction(tableNumber, gameId, payload) {
   if (!result) return false
 
   if (result.ended) {
-    endGame(game, result.ended.winner, result.ended.reason)
+    endGame(room, game, result.ended.winner, result.ended.reason)
     return true
   }
 
@@ -577,65 +617,65 @@ const BOT_REPLIES = [
 const BOT_REPLY_MIN = 1200
 const BOT_REPLY_SPREAD = 1600
 
-function scheduleBotReply(botNumber, toNumber) {
+function scheduleBotReply(room, botNumber, toNumber) {
   setTimeout(() => {
-    const bot = tables.get(botNumber)
-    const target = tables.get(toNumber)
+    const bot = room.tables.get(botNumber)
+    const target = room.tables.get(toNumber)
     if (!bot?.isBot || !target || isBlocked(target, botNumber)) return
-    markRead(bot, toNumber)
-    deliverMessage(bot, target, BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)])
-    syncAll()
+    markRead(room, bot, toNumber)
+    deliverMessage(room, bot, target, BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)])
+    syncAll(room)
   }, BOT_REPLY_MIN + Math.random() * BOT_REPLY_SPREAD).unref()
 }
 
-function scheduleBotThanks(botNumber, toNumber, item) {
+function scheduleBotThanks(room, botNumber, toNumber, item) {
   setTimeout(() => {
-    const bot = tables.get(botNumber)
-    const target = tables.get(toNumber)
+    const bot = room.tables.get(botNumber)
+    const target = room.tables.get(toNumber)
     if (!bot?.isBot || !target || isBlocked(target, botNumber)) return
-    markRead(bot, toNumber)
-    deliverMessage(bot, target, `${item.name}?! You're a legend 🙏🍻`)
-    syncAll()
+    markRead(room, bot, toNumber)
+    deliverMessage(room, bot, target, `${item.name}?! You're a legend 🙏🍻`)
+    syncAll(room)
   }, BOT_REPLY_MIN + Math.random() * BOT_REPLY_SPREAD).unref()
 }
 
-function scheduleBotAccept(challengeId) {
+function scheduleBotAccept(room, challengeId) {
   setTimeout(() => {
-    const challenge = challenges.get(challengeId)
+    const challenge = room.challenges.get(challengeId)
     if (!challenge || challenge.status !== 'pending') return
     clearChallengeTimer(challenge)
     challenge.status = 'accepted'
-    challenges.delete(challenge.id)
-    startGame(challenge)
-    syncAll()
+    room.challenges.delete(challenge.id)
+    startGame(room, challenge)
+    syncAll(room)
   }, BOT_ACCEPT_DELAY).unref()
 }
 
 // A human who walks away mid-game against a bot would otherwise pin that bot as
 // "playing" for the rest of the night. Void it rather than bill an absent table.
-function sweep() {
+function sweep(room) {
   let dirty = false
-  for (const game of [...games.values()]) {
+  for (const game of [...room.games.values()]) {
     if (game.goneTable === null || game.status !== 'active') continue
     const remaining = game.players.find((p) => p !== game.goneTable)
-    if (!tables.get(remaining)?.isBot) continue
+    if (!room.tables.get(remaining)?.isBot) continue
     if (Date.now() < game.disconnectDeadline + 30_000) continue
-    voidGame(game)
+    voidGame(room, game)
     dirty = true
   }
-  if (dirty) syncAll()
+  if (dirty) syncAll(room)
 }
 
 /* ----------------------------------------------------------- connection --- */
 
-function onConnection(socket) {
-  socket.emit('state:sync', buildSync(null))
+function onConnection(room, socket) {
+  socket.emit('state:sync', buildSync(room, null))
 
   // The sync sent on connection can land before the client has its listener
   // attached, and an unassigned tablet has nothing else to say — without this it
   // would sit on the connecting screen forever.
   socket.on('state:hello', () => {
-    socket.emit('state:sync', buildSync(currentTable(socket)))
+    socket.emit('state:sync', buildSync(room, currentTable(room, socket)))
   })
 
   socket.on('table:claim', ({ tableNumber } = {}) => {
@@ -644,21 +684,21 @@ function onConnection(socket) {
       return fail(socket, 'BAD_TABLE', 'Pick a table number between 1 and 99.')
     }
 
-    const existing = tables.get(number)
+    const existing = room.tables.get(number)
     if (existing?.isBot) {
       return fail(socket, 'TABLE_TAKEN', `Table ${number} is already in play.`)
     }
 
     // This socket was previously bound to a different table.
-    const previous = socket.data.tableNumber ? tables.get(socket.data.tableNumber) : null
+    const previous = socket.data.tableNumber ? room.tables.get(socket.data.tableNumber) : null
     if (previous && previous.number !== number && previous.socketId === socket.id) {
       previous.socketId = null
-      recomputeStatus(previous)
+      recomputeStatus(room, previous)
     }
 
     // Last claim wins — boot the stale device so the lobby has no ghosts.
     if (existing?.socketId && existing.socketId !== socket.id) {
-      const stale = io.sockets.sockets.get(existing.socketId)
+      const stale = room.nsp.sockets.get(existing.socketId)
       if (stale) {
         stale.data.tableNumber = null
         stale.emit('app:error', {
@@ -670,7 +710,7 @@ function onConnection(socket) {
     }
 
     const table = existing ?? makeTable(number)
-    tables.set(number, table)
+    room.tables.set(number, table)
     const returning = table.socketId === socket.id
     table.socketId = socket.id
     socket.data.tableNumber = number
@@ -679,35 +719,35 @@ function onConnection(socket) {
     if (!returning && table.signedIn) log(table, { kind: 'returned' })
 
     // Reconnecting into a frozen game unfreezes it.
-    const game = table.gameId ? games.get(table.gameId) : null
+    const game = table.gameId ? room.games.get(table.gameId) : null
     if (game && game.goneTable === number) {
       game.goneTable = null
       game.disconnectDeadline = null
     }
 
-    recomputeStatus(table)
-    flushDeliveries(table)
-    syncAll()
+    recomputeStatus(room, table)
+    flushDeliveries(room, table)
+    syncAll(room)
   })
 
   socket.on('table:signIn', () => {
     const number = socket.data.tableNumber
-    const table = number ? tables.get(number) : null
+    const table = number ? room.tables.get(number) : null
     if (!table || table.socketId !== socket.id) return fail(socket, 'NO_TABLE', 'Claim a table first.')
     if (table.signedIn) return
 
     table.signedIn = true
     table.seatedAt = Date.now()
     log(table, { kind: 'seated' })
-    recomputeStatus(table)
-    syncAll()
+    recomputeStatus(room, table)
+    syncAll(room)
   })
 
   socket.on('challenge:send', ({ toTable, item, gameType } = {}) => {
-    const from = currentTable(socket)
+    const from = currentTable(room, socket)
     if (!from) return fail(socket, 'NO_TABLE', 'Claim a table first.')
 
-    const target = tables.get(Number(toTable))
+    const target = room.tables.get(Number(toTable))
     if (!target || target.status === 'gone') {
       return fail(socket, 'NO_TABLE', 'That table is not available right now.')
     }
@@ -721,7 +761,7 @@ function onConnection(socket) {
       return fail(socket, 'BLOCKED', `Unblock Table ${target.number} to challenge them.`)
     }
 
-    const menuItem = MENU.find((m) => m.id === item)
+    const menuItem = room.venue.menu.find((m) => m.id === item)
     if (!menuItem) return fail(socket, 'BAD_ITEM', 'Pick something off the menu.')
 
     const mod = getGame(gameType)
@@ -729,11 +769,11 @@ function onConnection(socket) {
 
     if (from.gameId) return fail(socket, 'BUSY', "You're already in a game.")
 
-    const mine = from.challengeId ? challenges.get(from.challengeId) : null
+    const mine = from.challengeId ? room.challenges.get(from.challengeId) : null
     if (mine?.status === 'pending') {
       const mutual = mine.from === target.number && mine.to === from.number
       if (mutual && from.number < target.number) {
-        cancelChallenge(mine, 'superseded')
+        cancelChallenge(room, mine, 'superseded')
       } else if (mutual) {
         return fail(socket, 'ANSWER_FIRST', `Table ${target.number} challenged you first — answer that.`)
       } else {
@@ -754,18 +794,18 @@ function onConnection(socket) {
       expiresAt: Date.now() + CHALLENGE_TTL,
       timeoutHandle: null
     }
-    challenges.set(challenge.id, challenge)
+    room.challenges.set(challenge.id, challenge)
 
     from.challengeId = challenge.id
     target.challengeId = challenge.id
-    recomputeStatus(from)
-    recomputeStatus(target)
+    recomputeStatus(room, from)
+    recomputeStatus(room, target)
 
     challenge.timeoutHandle = setTimeout(() => {
-      const current = challenges.get(challenge.id)
+      const current = room.challenges.get(challenge.id)
       if (!current || current.status !== 'pending') return
-      cancelChallenge(current, 'expired')
-      syncAll()
+      cancelChallenge(room, current, 'expired')
+      syncAll(room)
     }, CHALLENGE_TTL)
     challenge.timeoutHandle.unref?.()
 
@@ -781,9 +821,9 @@ function onConnection(socket) {
 
     // A challenge is how two tables meet. From here on they share a thread, and
     // tapping either one on the floor opens it instead of another challenge sheet.
-    note(from.number, target.number, 'challenge', `Table ${from.number} challenged Table ${target.number} to ${mod.name} for ${menuItem.name}.`)
+    note(room, from.number, target.number, 'challenge', `Table ${from.number} challenged Table ${target.number} to ${mod.name} for ${menuItem.name}.`)
 
-    socketFor(target)?.emit('challenge:incoming', {
+    socketFor(room, target)?.emit('challenge:incoming', {
       id: challenge.id,
       fromTable: challenge.from,
       item: challenge.item,
@@ -792,45 +832,45 @@ function onConnection(socket) {
       expiresAt: challenge.expiresAt
     })
 
-    if (target.isBot) scheduleBotAccept(challenge.id)
-    syncAll()
+    if (target.isBot) scheduleBotAccept(room, challenge.id)
+    syncAll(room)
   })
 
   socket.on('challenge:respond', ({ challengeId, accept } = {}) => {
-    const table = currentTable(socket)
+    const table = currentTable(room, socket)
     if (!table) return
 
-    const challenge = challenges.get(challengeId)
+    const challenge = room.challenges.get(challengeId)
     if (!challenge || challenge.status !== 'pending' || challenge.to !== table.number) {
       return fail(socket, 'GONE', 'That challenge is no longer available.')
     }
 
     if (!accept) {
-      cancelChallenge(challenge, 'declined')
-      syncAll()
+      cancelChallenge(room, challenge, 'declined')
+      syncAll(room)
       return
     }
 
     clearChallengeTimer(challenge)
     challenge.status = 'accepted'
-    challenges.delete(challenge.id)
-    startGame(challenge)
-    syncAll()
+    room.challenges.delete(challenge.id)
+    startGame(room, challenge)
+    syncAll(room)
   })
 
   socket.on('challenge:cancel', () => {
-    const table = currentTable(socket)
-    const challenge = table?.challengeId ? challenges.get(table.challengeId) : null
+    const table = currentTable(room, socket)
+    const challenge = table?.challengeId ? room.challenges.get(table.challengeId) : null
     if (!challenge || challenge.from !== table.number) return
-    cancelChallenge(challenge, 'cancelled')
-    syncAll()
+    cancelChallenge(room, challenge, 'cancelled')
+    syncAll(room)
   })
 
   socket.on('gift:send', ({ toTable, item } = {}) => {
-    const from = currentTable(socket)
+    const from = currentTable(room, socket)
     if (!from) return fail(socket, 'NO_TABLE', 'Claim a table first.')
 
-    const target = tables.get(Number(toTable))
+    const target = room.tables.get(Number(toTable))
     if (!target || target.status === 'gone') {
       return fail(socket, 'NO_TABLE', 'That table is not around right now.')
     }
@@ -841,7 +881,7 @@ function onConnection(socket) {
       return fail(socket, 'BLOCKED', `Table ${target.number} isn't taking anything right now.`)
     }
 
-    const menuItem = MENU.find((m) => m.id === item)
+    const menuItem = room.venue.menu.find((m) => m.id === item)
     if (!menuItem) return fail(socket, 'BAD_ITEM', 'Pick something off the menu.')
 
     const ticket = {
@@ -855,26 +895,26 @@ function onConnection(socket) {
       gameName: null,
       reason: 'gift'
     }
-    tickets.set(ticket.id, ticket)
+    room.tickets.set(ticket.id, ticket)
 
     log(from, { kind: 'gift', direction: 'out', otherTable: target.number, item: menuItem })
     log(target, { kind: 'gift', direction: 'in', otherTable: from.number, item: menuItem })
 
     notify(target, { kind: 'gift', fromTable: from.number, item: menuItem })
-    socketFor(target)?.emit('gift:incoming', { fromTable: from.number, item: menuItem })
+    socketFor(room, target)?.emit('gift:incoming', { fromTable: from.number, item: menuItem })
     socket.emit('gift:sent', { toTable: target.number, item: menuItem })
 
-    if (target.isBot) scheduleBotThanks(target.number, from.number, menuItem)
+    if (target.isBot) scheduleBotThanks(room, target.number, from.number, menuItem)
 
-    syncStaff()
-    syncAll()
+    syncStaff(room)
+    syncAll(room)
   })
 
   socket.on('chat:send', ({ toTable, text } = {}) => {
-    const from = currentTable(socket)
+    const from = currentTable(room, socket)
     if (!from) return fail(socket, 'NO_TABLE', 'Claim a table first.')
 
-    const target = tables.get(Number(toTable))
+    const target = room.tables.get(Number(toTable))
     if (!target || target.status === 'gone') {
       return fail(socket, 'NO_TABLE', 'That table is not around right now.')
     }
@@ -891,13 +931,13 @@ function onConnection(socket) {
     const body = cleanMessage(text)
     if (!body) return fail(socket, 'EMPTY', 'Type something first.')
 
-    deliverMessage(from, target, body)
-    if (target.isBot) scheduleBotReply(target.number, from.number)
-    syncAll()
+    deliverMessage(room, from, target, body)
+    if (target.isBot) scheduleBotReply(room, target.number, from.number)
+    syncAll(room)
   })
 
   socket.on('chat:open', ({ withTable } = {}) => {
-    const table = currentTable(socket)
+    const table = currentTable(room, socket)
     if (!table) return
     const other = Number(withTable)
     if (!Number.isInteger(other)) return
@@ -905,36 +945,36 @@ function onConnection(socket) {
     table.viewing = other
     // Opening a thread that didn't exist creates it, and the floor plan on both
     // ends needs to know the pair is now acquainted.
-    const created = !hasThread(table.number, other)
-    const changed = markRead(table, other) || created
-    pushThread(table, other)
+    const created = !hasThread(room, table.number, other)
+    const changed = markRead(room, table, other) || created
+    pushThread(room, table, other)
 
     // The other end is watching for its read receipts to flip, so it needs the
     // thread again even though none of its own state moved.
-    const partner = tables.get(other)
-    if (partner) pushThread(partner, table.number)
+    const partner = room.tables.get(other)
+    if (partner) pushThread(room, partner, table.number)
 
-    if (changed) syncAll()
+    if (changed) syncAll(room)
   })
 
   socket.on('chat:close', () => {
-    const table = currentTable(socket)
+    const table = currentTable(room, socket)
     if (table) table.viewing = null
   })
 
   socket.on('chat:mute', ({ table: otherTable, muted } = {}) => {
-    const table = currentTable(socket)
+    const table = currentTable(room, socket)
     if (!table) return
     const other = Number(otherTable)
     if (!Number.isInteger(other) || other === table.number) return
 
     table.muted = table.muted.filter((n) => n !== other)
     if (muted) table.muted.push(other)
-    syncAll()
+    syncAll(room)
   })
 
   socket.on('chat:block', ({ table: otherTable, blocked } = {}) => {
-    const table = currentTable(socket)
+    const table = currentTable(room, socket)
     if (!table) return
     const other = Number(otherTable)
     if (!Number.isInteger(other) || other === table.number) return
@@ -948,39 +988,39 @@ function onConnection(socket) {
       table.notifications = table.notifications.filter((n) => n.fromTable !== other)
 
       // A pending challenge from someone you just blocked has to go too.
-      const challenge = table.challengeId ? challenges.get(table.challengeId) : null
+      const challenge = table.challengeId ? room.challenges.get(table.challengeId) : null
       if (challenge && (challenge.from === other || challenge.to === other)) {
-        cancelChallenge(challenge, 'declined')
+        cancelChallenge(room, challenge, 'declined')
       }
     }
-    syncAll()
+    syncAll(room)
   })
 
   socket.on('notif:read', () => {
-    const table = currentTable(socket)
+    const table = currentTable(room, socket)
     if (!table) return
     for (const entry of table.notifications) entry.read = true
-    syncAll()
+    syncAll(room)
   })
 
   socket.on('notif:clear', () => {
-    const table = currentTable(socket)
+    const table = currentTable(room, socket)
     if (!table) return
     table.notifications = []
-    syncAll()
+    syncAll(room)
   })
 
   socket.on('game:action', ({ gameId, ...payload } = {}) => {
-    const table = currentTable(socket)
+    const table = currentTable(room, socket)
     if (!table) return
-    if (applyAction(table.number, gameId, payload)) syncAll()
+    if (applyAction(room, table.number, gameId, payload)) syncAll(room)
   })
 
   socket.on('game:claimWin', ({ gameId } = {}) => {
-    const table = currentTable(socket)
+    const table = currentTable(room, socket)
     if (!table) return
 
-    const game = games.get(gameId)
+    const game = room.games.get(gameId)
     if (!game || game.status !== 'active' || !game.players.includes(table.number)) return
     if (game.goneTable === null || game.goneTable === table.number) {
       return fail(socket, 'STILL_HERE', 'Your opponent is still connected.')
@@ -989,67 +1029,67 @@ function onConnection(socket) {
       return fail(socket, 'TOO_SOON', 'Give them a few more seconds.')
     }
 
-    endGame(game, table.number, 'forfeit')
-    syncAll()
+    endGame(room, game, table.number, 'forfeit')
+    syncAll(room)
   })
 
   socket.on('game:forfeit', ({ gameId } = {}) => {
-    const table = currentTable(socket)
+    const table = currentTable(room, socket)
     if (!table) return
 
-    const game = games.get(gameId)
+    const game = room.games.get(gameId)
     if (!game || game.status !== 'active' || !game.players.includes(table.number)) return
 
     // Distinct from 'forfeit', which is a claim on someone who never came back.
-    endGame(game, game.players.find((p) => p !== table.number), 'quit')
-    syncAll()
+    endGame(room, game, game.players.find((p) => p !== table.number), 'quit')
+    syncAll(room)
   })
 
   socket.on('result:dismiss', () => {
-    const table = currentTable(socket)
+    const table = currentTable(room, socket)
     if (!table) return
     table.lastResult = null
-    recomputeStatus(table)
-    syncAll()
+    recomputeStatus(room, table)
+    syncAll(room)
   })
 
   socket.on('staff:join', () => {
     socket.join('staff')
-    socket.emit('staff:sync', staffPayload())
+    socket.emit('staff:sync', staffPayload(room))
   })
 
   socket.on('staff:deliver', ({ ticketId } = {}) => {
-    const ticket = tickets.get(ticketId)
+    const ticket = room.tickets.get(ticketId)
     if (!ticket || ticket.status === 'delivered') return
     ticket.status = 'delivered'
     ticket.deliveredAt = Date.now()
-    syncStaff()
+    syncStaff(room)
   })
 
   socket.on('staff:clearTable', ({ number } = {}) => {
-    const table = tables.get(Number(number))
+    const table = room.tables.get(Number(number))
     if (!table) return
-    wipeTable(table)
-    syncAll()
+    wipeTable(room, table)
+    syncAll(room)
   })
 
   socket.on('staff:savePlan', ({ plan } = {}) => {
-    if (!savePlan(plan)) return fail(socket, 'BAD_PLAN', 'That layout could not be saved.')
-    syncStaff()
-    syncAll()
+    if (!room.plans.save(plan)) return fail(socket, 'BAD_PLAN', 'That layout could not be saved.')
+    syncStaff(room)
+    syncAll(room)
   })
 
   socket.on('staff:resetPlan', () => {
-    resetPlan()
-    syncStaff()
-    syncAll()
+    room.plans.reset()
+    syncStaff(room)
+    syncAll(room)
   })
 
   socket.on('disconnect', () => {
     const number = socket.data.tableNumber
     if (!number) return
 
-    const table = tables.get(number)
+    const table = room.tables.get(number)
     // A newer device already took this table over; nothing to tear down.
     if (!table || table.socketId !== socket.id) return
 
@@ -1058,27 +1098,27 @@ function onConnection(socket) {
     if (table.signedIn) log(table, { kind: 'left' })
 
     if (table.challengeId) {
-      const challenge = challenges.get(table.challengeId)
+      const challenge = room.challenges.get(table.challengeId)
       if (challenge) challenge.goneTable = table.number
-      cancelChallenge(challenge, 'disconnected')
+      cancelChallenge(room, challenge, 'disconnected')
     }
 
-    const game = table.gameId ? games.get(table.gameId) : null
+    const game = table.gameId ? room.games.get(table.gameId) : null
     if (game && game.status === 'active') {
       game.goneTable = number
       game.disconnectDeadline = Date.now() + RECONNECT_GRACE
       table.status = 'playing'
     } else {
-      recomputeStatus(table)
+      recomputeStatus(room, table)
     }
 
-    syncAll()
+    syncAll(room)
   })
 }
 
-function currentTable(socket) {
+function currentTable(room, socket) {
   const number = socket.data.tableNumber
   if (!number) return null
-  const table = tables.get(number)
+  const table = room.tables.get(number)
   return table && table.socketId === socket.id ? table : null
 }
