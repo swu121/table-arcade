@@ -63,7 +63,9 @@ if (process.env.NODE_ENV === 'production') {
   app.use(express.static(dist, { maxAge: '1h', index: false }))
   app.use((req, res, next) => {
     if (req.method !== 'GET') return next()
-    res.sendFile(path.join(dist, 'index.html'))
+    // Anchored at dist so the dotfiles check only sees "index.html", not the
+    // directories above it — a checkout under a dot-directory would 404.
+    res.sendFile('index.html', { root: dist })
   })
 }
 

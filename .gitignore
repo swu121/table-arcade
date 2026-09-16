@@ -12,3 +12,7 @@ data/
 
 # Agent worktrees
 .claude/worktrees/
+
+# Playwright output
+test-results/
+playwright-report/

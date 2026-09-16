@@ -11,7 +11,8 @@
     "icons": "node scripts/gen-icons.mjs",
     "db:migrate": "node server/db/migrate.js",
     "seed": "node scripts/seed.js",
-    "test": "node --test \"server/**/*.test.js\""
+    "test": "node --test \"server/**/*.test.js\"",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "express": "^5.1.0",
@@ -22,6 +23,7 @@
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.1.0",
     "@vitejs/plugin-react": "^5.0.0",
     "concurrently": "^9.2.0",
