@@ -124,7 +124,6 @@ npm run dev
 
 ```sh
 npm test            # game rules, venue isolation, persistence backends — no database needed
-
 npm run test:e2e    # browser tests: tablets and staff screen, in Chromium
 npm run build       # production client bundle
 npm start           # serve the built client from the node server
