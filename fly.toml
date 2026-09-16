@@ -5,12 +5,19 @@ primary_region = "sea"
 
 [env]
   PORT = "3000"
+  # DATABASE_URL is a secret, not an env entry:
+  #   fly secrets set DATABASE_URL=postgres://...
+  # With it set, venues, floor plans and tickets live in Postgres and survive a
+  # deploy; migrations run at boot and `fly ssh console -C "npm run seed"` adds
+  # the venues from docs/venues.example.json. Without it the server falls back
+  # to JSON files under data/ (gone on the next deploy) with tickets in memory.
+  # There is deliberately no volume.
 
 [http_service]
   internal_port = 3000
   force_https = true
-  # Every game, challenge and ticket lives in memory. Stopping the machine wipes
-  # the room mid-pitch, so this one stays up.
+  # Every game, challenge and chat thread lives in memory. Stopping the machine
+  # wipes the room mid-pitch, so this one stays up.
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1

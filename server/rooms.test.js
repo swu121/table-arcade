@@ -4,6 +4,7 @@ import { createServer } from 'node:http'
 import { Server } from 'socket.io'
 import { io as connect } from 'socket.io-client'
 import { init } from './handlers.js'
+import { createMemoryRepos } from './db/index.js'
 
 // Two restaurants on one server. Table 4 exists in both, and neither can see,
 // message or challenge the other's.
@@ -12,10 +13,11 @@ const VENUES = [
   { slug: 'south', name: 'South', botTables: [20], menu: [{ id: 'soju', name: 'Soju', price: 12 }] }
 ]
 
-async function boot() {
+// `repos` is the durable store; passing the same one to two boots is a restart.
+async function boot(repos = createMemoryRepos()) {
   const httpServer = createServer()
   const io = new Server(httpServer)
-  const app = init(io, { venues: VENUES })
+  const app = init(io, { venues: VENUES, repos })
   await new Promise((resolve) => httpServer.listen(0, resolve))
   const port = httpServer.address().port
   return {
@@ -122,6 +124,115 @@ test('tickets and staff sync stay inside their venue', async (t) => {
   const southPayload = await southStaff.staff.next()
   assert.equal(southPayload.venue.slug, 'south')
   assert.equal(southPayload.tickets.length, 0)
+})
+
+const PLAN = {
+  width: 1000,
+  height: 700,
+  name: 'Patio',
+  tables: [
+    { number: 4, x: 10, y: 20, w: 78, h: 78, shape: 'round', seats: 2 },
+    { number: 12, x: 200, y: 20, w: 78, h: 78, shape: 'round', seats: 4 }
+  ],
+  fixtures: []
+}
+
+const stored = (id, owingTable, owedToTable) => ({
+  id,
+  item: { id: 'draft', name: 'Draft Beer', price: 7, icon: 'beer' },
+  owingTable,
+  owedToTable,
+  status: 'pending',
+  createdAt: Date.now() - 60_000,
+  gameId: null,
+  gameName: null,
+  reason: 'gift'
+})
+
+test('a room is created with the floor plan and open tickets the store kept', async (t) => {
+  const repos = createMemoryRepos()
+  await repos.floorplans.save('north', PLAN)
+  await repos.tickets.create('north', stored('tk_old', 4, 12))
+  await repos.tickets.create('north', { ...stored('tk_done', 4, 12), status: 'delivered', deliveredAt: Date.now() })
+  await repos.tickets.create('south', stored('tk_south', 4, 20))
+
+  const server = await boot(repos)
+  const guest = tablet(server, 'north')
+  const staff = tablet(server, 'north')
+  t.after(() => server.close(guest, staff))
+
+  // The very first tablet in already sees the saved room, not the default.
+  const sync = await seat(guest, 4)
+  assert.equal(sync.floorplan.name, 'Patio')
+  assert.deepEqual(sync.floorplan.tables.map((x) => x.number), [4, 12])
+
+  if (!staff.connected) await once(staff, 'connect')
+  staff.emit('staff:join')
+  const board = await staff.staff.next()
+  assert.deepEqual(board.tickets.map((x) => x.id), ['tk_old'])
+  assert.equal(board.tickets[0].status, 'pending')
+  assert.equal(board.tickets[0].owingTable, 4)
+  assert.equal(board.floorplan.name, 'Patio')
+})
+
+test('tickets and plan edits made tonight are still there after a restart', async (t) => {
+  const repos = createMemoryRepos()
+
+  // Night one: a gift, and staff lay out the patio.
+  const first = await boot(repos)
+  const guest = tablet(first, 'north')
+  const staff = tablet(first, 'north')
+  await seat(guest, 4)
+  if (!staff.connected) await once(staff, 'connect')
+  staff.emit('staff:join')
+  await staff.staff.next()
+  guest.emit('gift:send', { toTable: 12, item: 'draft' })
+  const withTicket = await staff.staff.until((p) => p.tickets.length > 0)
+  const ticketId = withTicket.tickets[0].id
+  staff.emit('staff:savePlan', { plan: PLAN })
+  await staff.staff.until((p) => p.floorplan.name === 'Patio')
+  await first.close(guest, staff)
+
+  // Deploy. A new server over the same store has the ticket and the plan.
+  const second = await boot(repos)
+  const staff2 = tablet(second, 'north')
+  if (!staff2.connected) await once(staff2, 'connect')
+  staff2.emit('staff:join')
+  const board = await staff2.staff.next()
+  assert.deepEqual(board.tickets.map((x) => x.id), [ticketId])
+  assert.equal(board.tickets[0].owedToTable, 12)
+  assert.equal(board.floorplan.name, 'Patio')
+
+  staff2.emit('staff:deliver', { ticketId })
+  await staff2.staff.until((p) => p.tickets[0].status === 'delivered')
+  await second.close(staff2)
+
+  // And delivering it was remembered too: the third boot has nothing open.
+  assert.deepEqual(await repos.tickets.openFor('north'), [])
+  const third = await boot(repos)
+  const staff3 = tablet(third, 'north')
+  t.after(() => third.close(staff3))
+  if (!staff3.connected) await once(staff3, 'connect')
+  staff3.emit('staff:join')
+  assert.deepEqual((await staff3.staff.next()).tickets, [])
+})
+
+test('clearing a table drops its tickets from the store as well as the board', async (t) => {
+  const repos = createMemoryRepos()
+  await repos.tickets.create('north', stored('tk_a', 4, 12))
+  await repos.tickets.create('north', stored('tk_b', 7, 12))
+  const server = await boot(repos)
+  const staff = tablet(server, 'north')
+  t.after(() => server.close(staff))
+  if (!staff.connected) await once(staff, 'connect')
+  staff.emit('staff:join')
+  await staff.staff.next()
+
+  staff.emit('staff:clearTable', { number: 12 })
+  await staff.staff.until((p) => p.tickets.length === 0)
+  // The write-through is fire-and-forget; give it a turn of the loop.
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(await repos.tickets.openFor('north'), [])
 })
 
 test('an unknown venue is refused at the namespace', async (t) => {

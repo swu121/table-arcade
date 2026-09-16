@@ -9,3 +9,6 @@ dist
 # floor plans (fall back to defaultPlan()).
 data/
 .playwright-mcp
+
+# Agent worktrees
+.claude/worktrees/

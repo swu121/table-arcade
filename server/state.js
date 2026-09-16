@@ -21,13 +21,16 @@ export const MAX_NOTIFICATIONS = 40
 export const MAX_HISTORY = 40
 
 // One room per venue: the live state of one restaurant's floor. Everything in
-// here is for tonight only. Nothing a table does can reach another room, because
-// no handler ever holds more than one.
-export function createRoom({ venue, nsp, plans }) {
+// here is for tonight only, except what `repos` is handed to keep — the floor
+// plan and the tickets — which come back when the room is next created.
+// Nothing a table does can reach another room, because no handler ever holds
+// more than one.
+export function createRoom({ venue, nsp, plans, repos = null }) {
   const room = {
     venue,
     nsp,
     plans,
+    repos,
     tables: new Map(),
     challenges: new Map(),
     games: new Map(),

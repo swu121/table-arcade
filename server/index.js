@@ -5,21 +5,38 @@ import { networkInterfaces } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Server } from 'socket.io'
+import { createRepos } from './db/index.js'
 import { init, reportClientError } from './handlers.js'
+import { loadVenues } from './venues.js'
 import { loadVersion } from './version.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const dist = path.join(here, '..', 'dist')
 const dataDir = process.env.DATA_DIR || path.join(here, '..', 'data')
 
-migrateLegacyPlan()
+// DATABASE_URL set: venues, floor plans and tickets live in Postgres and
+// survive a deploy. Unset: venues and plans are JSON under data/, and tickets
+// last as long as the process.
+const repos = await createRepos({ dataDir, log: console.log })
+if (repos.backend === 'file') migrateLegacyPlan()
 
 const app = express()
 const httpServer = createServer(app)
 const io = new Server(httpServer, { cors: { origin: '*' } })
 
 const version = loadVersion(dist)
-const { venues, roomFor } = init(io, { dataDir, version })
+const listed = await loadVenues(repos)
+if (repos.backend === 'postgres' && !(await repos.venues.list()).length) {
+  console.warn('  no venues in the database yet — serving the demo venue. Run `npm run seed` to add yours.')
+}
+const { venues, roomFor } = init(io, { repos, venues: listed, version })
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => {
+    httpServer.close()
+    repos.close().finally(() => process.exit(0))
+  })
+}
 
 app.get('/healthz', (_req, res) => res.type('text').send('ok'))
 app.get('/api/version', (_req, res) => res.json({ version }))
@@ -77,7 +94,8 @@ const PORT = Number(process.env.PORT) || 3000
 httpServer.listen(PORT, '0.0.0.0', () => {
   const dev = process.env.NODE_ENV !== 'production'
   const clientPort = dev ? 5173 : PORT
-  console.log(`\n  TABLE ARCADE  ·  ${dev ? 'development' : 'production'}  ·  build ${version}\n`)
+  const storage = repos.backend === 'postgres' ? 'postgres' : `${repos.backend} (${dataDir})`
+  console.log(`\n  TABLE ARCADE  ·  ${dev ? 'development' : 'production'}  ·  build ${version}  ·  storage: ${storage}\n`)
   for (const venue of venues.all()) {
     console.log(`  ${venue.name} (${venue.slug})`)
     console.log(`    local    http://localhost:${clientPort}/v/${venue.slug}`)

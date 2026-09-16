@@ -104,9 +104,11 @@ resolves tables, challenges, games, tickets and chat threads from that one room 
 one restaurant cannot see, message, challenge or be billed by a table in another, by
 construction rather than by a check. `server/rooms.test.js` proves it.
 
-Live state lives in memory. There's no database and no auth yet, and stopping the process
-wipes every room. Venue config and floor plans are the exception, and persist under `data/`
-(or `DATA_DIR`).
+Live state — who's seated, challenges, games, chat — lives in memory, and stopping the process
+wipes it. What has to outlive a deploy goes through a small repository layer (`server/db/`):
+venues, floor plans and tickets. Set `DATABASE_URL` and those live in Postgres; leave it unset
+and venues and plans are JSON under `data/` (or `DATA_DIR`) with tickets kept in memory. There's
+no auth yet.
 
 ## Running it
 
@@ -121,10 +123,24 @@ npm run dev
 `npm run dev` prints every venue with a LAN address, which is what the tablets actually point at.
 
 ```sh
-npm test            # server-side game rules
+npm test            # game rules, venue isolation, persistence backends — no database needed
 npm run build       # production client bundle
 npm start           # serve the built client from the node server
 ```
+
+### With Postgres
+
+```sh
+export DATABASE_URL=postgres://user:pass@host:5432/tablearcade
+npm run seed        # inserts the venues from docs/venues.example.json (safe to re-run)
+npm start           # migrations in server/db/migrations/ run at boot
+```
+
+`npm run db:migrate` applies pending migrations without starting the server. Tests against
+the Postgres backend run only when `DATABASE_URL` is set, and are skipped otherwise.
+
+On Fly, `fly secrets set DATABASE_URL=...` and deploy; no volume is needed. Then
+`fly ssh console -C "npm run seed"` once.
 
 ## Layout
 
@@ -134,9 +150,12 @@ server/
   venues.js       the venue list: slug, name, menu, bot tables
   handlers.js     lobby, challenges, games, tickets — one room per venue
   state.js        createRoom(): per-venue in-memory tables/games/tickets/chat
-  floorplan.js    per-venue layout store: load, validate, persist
-  rooms.test.js   two venues on one server can't reach each other
+  floorplan.js    per-venue layout: default plan, validation, in-room store
+  rooms.test.js   two venues on one server can't reach each other; rooms rehydrate
+  db/             repository layer: postgres | file | memory, migrations, seed target
   games/          one module per game, plus rng + shared race logic
+scripts/
+  seed.js         put docs/venues.example.json into Postgres on a first deploy
 src/
   screens/        lobby, game host, per-game screens, result, staff
   components/     board, chrome, icons
