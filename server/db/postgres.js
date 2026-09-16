@@ -80,6 +80,23 @@ export async function createPostgresRepos(connectionString, { log = () => {} } =
       }
     },
 
+    snapshots: {
+      async save(slug, snapshot) {
+        await query(
+          `INSERT INTO room_snapshots (venue_slug, taken_at, data) VALUES ($1, $2, $3::jsonb)
+           ON CONFLICT (venue_slug) DO UPDATE SET taken_at = EXCLUDED.taken_at, data = EXCLUDED.data`,
+          [slug, new Date(snapshot.takenAt ?? Date.now()), JSON.stringify(snapshot)]
+        )
+      },
+      async load(slug) {
+        const { rows } = await query('SELECT data FROM room_snapshots WHERE venue_slug = $1', [slug])
+        return rows[0]?.data ?? null
+      },
+      async clear(slug) {
+        await query('DELETE FROM room_snapshots WHERE venue_slug = $1', [slug])
+      }
+    },
+
     async close() {
       await pool.end()
     }

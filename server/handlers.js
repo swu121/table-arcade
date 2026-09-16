@@ -15,6 +15,7 @@ import { getGame, gameMenu, DEFAULT_GAME } from './games/index.js'
 import { createPlanStore } from './floorplan.js'
 import { createVenueRegistry, venueList } from './venues.js'
 import { createMemoryRepos } from './db/index.js'
+import { isEmptySnapshot, restoreRoom, snapshotRoom } from './snapshot.js'
 
 const BOT_ACCEPT_DELAY = 1500
 
@@ -31,6 +32,7 @@ export const NAMESPACE = /^\/venue\/([a-z0-9-]+)$/
 export function init(io, { repos = createMemoryRepos(), venues: list = null, version = 'dev' } = {}) {
   const venues = createVenueRegistry(venueList(list))
   const rooms = new Map()
+  let closing = false
 
   function roomFor(slug) {
     let room = rooms.get(slug)
@@ -53,7 +55,12 @@ export function init(io, { repos = createMemoryRepos(), venues: list = null, ver
     // Nobody's handlers attach until the room has its plan and open tickets
     // back, so the first tablet in after a restart sees the same board as the
     // last one out.
+    //
+    // While the server is going down, a new socket is held here rather than
+    // refused: a refusal makes the client give up on the namespace for good,
+    // whereas a held socket is dropped with everyone else and reconnects.
     nsp.use((_socket, next) => {
+      if (closing) return
       room.ready.then(() => next())
     })
     nsp.on('connection', (socket) => {
@@ -79,7 +86,20 @@ export function init(io, { repos = createMemoryRepos(), venues: list = null, ver
   const sweeper = setInterval(() => rooms.forEach(sweep), 10_000)
   sweeper.unref()
 
-  return { venues, roomFor, rooms, version, reportClientError, stop: () => clearInterval(sweeper) }
+  // The room-side half of a graceful shutdown: stop letting sockets in, write
+  // every room down, and tell every tablet what is about to happen. Closing
+  // the sockets and the process is the caller's job (see shutdown.js).
+  async function suspend({ retryIn = 3000 } = {}) {
+    closing = true
+    clearInterval(sweeper)
+    const results = await Promise.allSettled([...rooms.values()].map(suspendRoom))
+    for (const result of results) {
+      if (result.status === 'rejected') console.warn('shutdown: snapshot failed —', result.reason?.message)
+    }
+    for (const room of rooms.values()) room.nsp.emit('app:restarting', { retryIn })
+  }
+
+  return { venues, roomFor, rooms, version, reportClientError, suspend, stop: () => clearInterval(sweeper) }
 }
 
 // A tablet's own account of what went wrong, posted over HTTP because the
@@ -125,6 +145,60 @@ async function hydrate(room) {
   } catch (error) {
     console.warn(`db: could not load open tickets for ${venue.slug} —`, error.message)
   }
+  // Last: what a graceful shutdown left of tonight. Cleared once read, so a
+  // crash later in the evening can't bring the same snapshot back a second time.
+  try {
+    const snapshot = await repos.snapshots.load(venue.slug)
+    if (snapshot) {
+      if (restoreRoom(room, snapshot)) resumeRoom(room)
+      await repos.snapshots.clear(venue.slug)
+    }
+  } catch (error) {
+    console.warn(`db: could not restore the room snapshot for ${venue.slug} —`, error.message)
+  }
+}
+
+// The room as it stands, into the store. An empty room clears its slot rather
+// than leaving a snapshot of nothing to be restored.
+async function suspendRoom(room) {
+  const snapshot = snapshotRoom(room)
+  if (isEmptySnapshot(snapshot)) {
+    await room.repos.snapshots.clear(room.venue.slug)
+    return
+  }
+  await room.repos.snapshots.save(room.venue.slug, snapshot)
+  console.log(
+    `shutdown: suspended ${room.venue.slug} — ${snapshot.tables.length} tables, ` +
+      `${snapshot.challenges.length} challenges, ${snapshot.games.length} games`
+  )
+}
+
+// A restored room has its facts back but none of its timers, and none of its
+// sockets. Rebuild the former from the deadlines; the latter arrive on their
+// own as the tablets reconnect.
+function resumeRoom(room) {
+  const now = Date.now()
+  for (const challenge of room.challenges.values()) {
+    armChallenge(room, challenge)
+    if (room.tables.get(challenge.to)?.isBot) scheduleBotAccept(room, challenge.id)
+  }
+  for (const game of room.games.values()) {
+    game.ctx = contextFor(room, game)
+    // Nobody is connected yet. The disconnect handler models one absent player
+    // at a time, so mark the first human gone; table:claim passes the freeze
+    // to the other one if they are still missing when this one returns.
+    if (game.goneTable === null) {
+      const human = game.players.find((p) => !room.tables.get(p)?.isBot)
+      if (human !== undefined) {
+        game.goneTable = human
+        game.disconnectDeadline = now + RECONNECT_GRACE
+      }
+    }
+    const mod = getGame(game.type)
+    if (mod.resume) mod.resume(game, game.ctx)
+    else mod.tick?.(game, game.ctx)
+  }
+  for (const table of room.tables.values()) recomputeStatus(room, table)
 }
 
 // Durable writes ride behind the broadcast. The room's Map is what staff see
@@ -207,7 +281,7 @@ function takenNumbers(room) {
 
 const venueInfo = (room) => ({ slug: room.venue.slug, name: room.venue.name })
 
-function buildSync(room, table) {
+export function buildSync(room, table) {
   const base = {
     venue: venueInfo(room),
     menu: room.venue.menu,
@@ -310,6 +384,22 @@ function clearChallengeTimer(challenge) {
     clearTimeout(challenge.timeoutHandle)
     challenge.timeoutHandle = null
   }
+}
+
+// The expiry timer, from the deadline — so a challenge restored after a
+// restart has whatever was left of its thirty seconds, not a fresh thirty.
+function armChallenge(room, challenge) {
+  clearChallengeTimer(challenge)
+  challenge.timeoutHandle = setTimeout(
+    () => {
+      const current = room.challenges.get(challenge.id)
+      if (!current || current.status !== 'pending') return
+      cancelChallenge(room, current, 'expired')
+      syncAll(room)
+    },
+    Math.max(0, challenge.expiresAt - Date.now())
+  )
+  challenge.timeoutHandle.unref?.()
 }
 
 function detachChallenge(room, challenge) {
@@ -798,11 +888,19 @@ function onConnection(room, socket) {
     // not arriving. An empty tablet booting up is neither.
     if (!returning && table.signedIn) log(table, { kind: 'returned' })
 
-    // Reconnecting into a frozen game unfreezes it.
+    // Reconnecting into a frozen game unfreezes it — unless the other table is
+    // the one missing now (both dropped, or the server restarted under them),
+    // in which case the freeze, and a fresh grace, pass to them.
     const game = table.gameId ? room.games.get(table.gameId) : null
     if (game && game.goneTable === number) {
-      game.goneTable = null
-      game.disconnectDeadline = null
+      const other = room.tables.get(game.players.find((p) => p !== number))
+      if (other && !isBound(other)) {
+        game.goneTable = other.number
+        game.disconnectDeadline = Date.now() + RECONNECT_GRACE
+      } else {
+        game.goneTable = null
+        game.disconnectDeadline = null
+      }
     }
 
     recomputeStatus(room, table)
@@ -881,13 +979,7 @@ function onConnection(room, socket) {
     recomputeStatus(room, from)
     recomputeStatus(room, target)
 
-    challenge.timeoutHandle = setTimeout(() => {
-      const current = room.challenges.get(challenge.id)
-      if (!current || current.status !== 'pending') return
-      cancelChallenge(room, current, 'expired')
-      syncAll(room)
-    }, CHALLENGE_TTL)
-    challenge.timeoutHandle.unref?.()
+    armChallenge(room, challenge)
 
     notify(target, {
       kind: 'challenge',

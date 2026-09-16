@@ -81,23 +81,51 @@ export function makeRaceGame(config) {
         this.runBot(game, ctx, number, target, stepMs)
       }
 
-      ctx.after(COUNTDOWN_MS + MAX_RUN_MS, () => {
+      ctx.after(Math.max(0, game.state.startsAt + MAX_RUN_MS - Date.now()), () => {
         for (const run of Object.values(game.state.runs)) run.done = true
         const result = this.resolve(game)
         if (result.ended) ctx.finish(result.ended)
       })
     },
 
+    // The timing in a race is the count-in and the ceiling, both hung off
+    // `startsAt`. Across a restart a countdown still running is re-anchored to
+    // the new clock; a run already underway keeps its original mark, because
+    // the tablets' local runs are anchored to it and never saw the server go.
+    snapshot(state, now) {
+      const { botsRunning, ...rest } = state
+      return { ...structuredClone(rest), startsIn: state.startsAt - now }
+    },
+
+    restore(saved, now) {
+      const { startsIn, ...rest } = saved
+      const state = structuredClone(rest)
+      if (Number(startsIn) > 0) state.startsAt = now + Number(startsIn)
+      return state
+    },
+
+    // After a restart the bots pick up from the score they had reported, and
+    // the ceiling is re-armed from wherever `startsAt` now points.
+    resume(game, ctx) {
+      game.state.botsRunning = false
+      this.tick(game, ctx)
+    },
+
     runBot(game, ctx, number, target, stepMs) {
-      const step = (score) => {
-        ctx.after(score === 0 ? COUNTDOWN_MS : stepMs, () => {
+      const run = game.state.runs[number]
+      if (!run || run.done) return
+      // The first step waits out the count-in on a fresh run, and one ordinary
+      // beat on a run being picked up part-way.
+      const lead = run.score > 0 ? stepMs : Math.max(0, game.state.startsAt - Date.now())
+      const step = (score, delay) => {
+        ctx.after(delay, () => {
           if (game.state.runs[number].done) return
           if (score >= target) return ctx.act(number, { type: 'done', score: target })
           ctx.act(number, { type: 'progress', score })
-          step(score + 1)
+          step(score + 1, stepMs)
         })
       }
-      step(0)
+      step(run.score > 0 ? run.score + 1 : 0, lead)
     }
   }
 }

@@ -6,11 +6,14 @@ import { createMemoryTickets } from './memory.js'
 // What the server did before there was a database: venues in
 // <dataDir>/venues.json, each venue's layout in
 // <dataDir>/venues/<slug>/floorplan.json, and tickets nowhere — they live as
-// long as the process. Same interface as the Postgres backend, so the handlers
+// long as the process. A graceful shutdown's snapshot of each room goes to
+// <dataDir>/venues/<slug>/snapshot.json, which is how tonight's tickets make
+// it across a restart here. Same interface as the Postgres backend, so the handlers
 // cannot tell which one they were given.
 export function createFileRepos(dataDir) {
   const venuesFile = path.join(dataDir, 'venues.json')
   const planFile = (slug) => path.join(dataDir, 'venues', slug, 'floorplan.json')
+  const snapshotFile = (slug) => path.join(dataDir, 'venues', slug, 'snapshot.json')
 
   function readJson(file) {
     try {
@@ -63,6 +66,19 @@ export function createFileRepos(dataDir) {
     },
 
     tickets: createMemoryTickets(bucket),
+
+    snapshots: {
+      async save(slug, snapshot) {
+        writeJson(snapshotFile(slug), snapshot)
+      },
+      async load(slug) {
+        const raw = readJson(snapshotFile(slug))
+        return raw && typeof raw === 'object' ? raw : null
+      },
+      async clear(slug) {
+        fs.rmSync(snapshotFile(slug), { force: true })
+      }
+    },
 
     async close() {}
   }

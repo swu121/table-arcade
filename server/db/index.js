@@ -3,12 +3,14 @@ import { createMemoryRepos } from './memory.js'
 
 export { createFileRepos, createMemoryRepos }
 
-// The repository layer: venues, floor plans and tickets, behind one interface
-// the handlers use without knowing what is underneath.
+// The repository layer: venues, floor plans, tickets and the room snapshot a
+// graceful shutdown leaves behind, behind one interface the handlers use
+// without knowing what is underneath.
 //
 //   repos.venues.list() / upsert(venue)
 //   repos.floorplans.get(slug) / save(slug, plan)
 //   repos.tickets.create(slug, ticket) / deliver(slug, id) / openFor(slug) / clearFor(slug, table)
+//   repos.snapshots.save(slug, snapshot) / load(slug) / clear(slug)
 //   repos.close()
 //
 // Chosen once at startup: DATABASE_URL means Postgres, a data directory means
