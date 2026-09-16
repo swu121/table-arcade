@@ -9,6 +9,7 @@ import { createRepos } from './db/index.js'
 import { init, reportClientError } from './handlers.js'
 import { pairHandler } from './pairing.js'
 import { gracefulShutdown } from './shutdown.js'
+import { loginHandler, logoutHandler, statusHandler } from './staff.js'
 import { loadVenues } from './venues.js'
 import { loadVersion } from './version.js'
 
@@ -57,6 +58,11 @@ app.post('/api/client-error', express.json({ limit: '32kb' }), (req, res) => {
 
 // A tablet trades a staff-issued pairing code for its device token here.
 app.post('/api/venue/:slug/pair', express.json({ limit: '4kb' }), pairHandler({ roomFor }))
+
+// Staff sign in here for the session token their socket handshake carries.
+app.post('/api/venue/:slug/staff/login', express.json({ limit: '4kb' }), loginHandler({ roomFor }))
+app.post('/api/venue/:slug/staff/logout', express.json({ limit: '4kb' }), logoutHandler({ roomFor }))
+app.get('/api/venue/:slug/staff/status', statusHandler({ roomFor }))
 
 // The bare URL is the single-venue demo: it lands on the first venue listed.
 // Vite serves the client in dev, so the client asks for this instead of being

@@ -34,7 +34,7 @@ async function boot(repos = createMemoryRepos()) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body)
       }),
-    client: (slug, auth = {}) => connect(`${base}/venue/${slug}`, { transports: ['websocket'], auth }),
+    client: (slug, auth = {}) => watch(connect(`${base}/venue/${slug}`, { transports: ['websocket'], auth })),
     close: async (...clients) => {
       for (const client of clients) client.close()
       server.stop()
@@ -46,13 +46,18 @@ async function boot(repos = createMemoryRepos()) {
 
 const once = (socket, event) => new Promise((resolve) => socket.once(event, resolve))
 
-// Resolves with 'connect' or the connect_error message, whichever comes first.
-function outcome(socket) {
-  return new Promise((resolve) => {
+// A middleware refusal is final — the client does not retry — so the listener
+// goes on the socket the moment it is made.
+function watch(socket) {
+  socket.outcome = new Promise((resolve) => {
     socket.once('connect', () => resolve('connect'))
     socket.once('connect_error', (error) => resolve(error.message))
   })
+  return socket
 }
+
+// Resolves with 'connect' or the connect_error message, whichever came first.
+const outcome = (socket) => socket.outcome
 
 function inbox(socket, event) {
   const queue = []
@@ -173,7 +178,7 @@ test('a paired tablet is admitted, seen, and kicked when revoked', async (t) => 
   const { token, deviceId } = await (await server.pair('north', { code })).json()
 
   const tablet = server.client('north', { token })
-  const staff = server.client('north', { staff: true })
+  const staff = server.client('north', { staff: 'dev' })
   t.after(() => server.close(tablet, staff))
   assert.equal(await outcome(tablet), 'connect')
   assert.equal(room.nsp.sockets.get(tablet.id).data.deviceId, deviceId)
@@ -219,14 +224,12 @@ test('a venue with requirePairing off admits a socket without a token', async (t
   assert.equal(await outcome(bare), 'connect')
 })
 
-// TEMPORARY, until staff login: the staff screen gets in on `staff: true`.
-test('a staff handshake is admitted without a token, for now', async (t) => {
+// The staff screen no longer gets in on `staff: true`; a session token (or,
+// outside production with no users, the dev door) is what admits it. See
+// staff.test.js.
+test('a staff handshake with the old `staff: true` flag is refused', async (t) => {
   const server = await boot()
   const staff = server.client('north', { staff: true })
   t.after(() => server.close(staff))
-  assert.equal(await outcome(staff), 'connect')
-  staff.emit('staff:pairCode')
-  const issued = await once(staff, 'staff:pairCode')
-  assert.match(issued.code, /^\d{6}$/)
-  assert.ok(issued.expiresAt > Date.now())
+  assert.equal(await outcome(staff), 'Unauthorized')
 })

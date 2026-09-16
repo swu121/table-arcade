@@ -1,5 +1,6 @@
 import { clone } from './tickets.js'
 import { createDevicesRepo } from './devices.js'
+import { createStaffRepo } from './staff.js'
 
 // The whole repository interface, in Maps. Tests use it, and so does a server
 // booted with neither DATABASE_URL nor a data directory. Tickets here behave
@@ -10,6 +11,7 @@ export function createMemoryRepos() {
   const tickets = new Map() // slug -> Map<id, ticket>
   const devices = new Map() // id -> record, hash and all
   const snapshots = new Map()
+  const staff = new Map() // id -> record, password hash and all
 
   const bucket = (slug) => {
     let map = tickets.get(slug)
@@ -57,6 +59,11 @@ export function createMemoryRepos() {
         snapshots.delete(slug)
       }
     },
+
+    staff: createStaffRepo({
+      all: () => [...staff.values()],
+      put: (record) => staff.set(record.id, { ...record })
+    }),
 
     async close() {}
   }

@@ -84,7 +84,7 @@ test('staff can restart one tablet now, or every tablet when idle', async (t) =>
   const server = await boot()
   const a = tablet(server)
   const b = tablet(server)
-  const staff = tablet(server)
+  const staff = tablet(server, { staff: 'dev' })
   t.after(() => server.close(a, b, staff))
   await seat(a, 4)
   await seat(b, 5)
@@ -111,7 +111,7 @@ test('staff can restart one tablet now, or every tablet when idle', async (t) =>
 test('a crash report lands in the table’s activity for staff', async (t) => {
   const server = await boot()
   const a = tablet(server)
-  const staff = tablet(server)
+  const staff = tablet(server, { staff: 'dev' })
   t.after(() => server.close(a, staff))
   await seat(a, 7)
   if (!staff.connected) await once(staff, 'connect')

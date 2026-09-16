@@ -4,9 +4,11 @@ import { route, redirectToDefault } from './venue.js'
 import { useWakeLock } from './useWakeLock.js'
 import { useReloadPolicy } from './lib/reload.js'
 import { clearDeviceToken } from './lib/device.js'
+import { clearStaffSession, getStaffSession, staffLogout } from './lib/staffSession.js'
 import { Backdrop, OfflineBanner, Toast } from './components/Bits.jsx'
 import { Mark, Wordmark } from './components/Logo.jsx'
 import { Pairing } from './screens/Pairing.jsx'
+import { StaffLogin } from './screens/StaffLogin.jsx'
 import { Devices } from './screens/Devices.jsx'
 import { Setup } from './screens/Setup.jsx'
 import { Launch } from './screens/Launch.jsx'
@@ -63,40 +65,60 @@ function NoVenue({ slug }) {
 }
 
 // Two refusals come back as connect errors rather than messages, and neither
-// is worth retrying: the slug isn't a venue, or the venue wants a device token
-// this tablet doesn't hold. Both disconnect and show a screen; pairing is the
-// only way back from the second, and being revoked mid-night leads there too.
+// is worth retrying: the slug isn't a venue, or the venue wants a credential
+// this browser doesn't hold — a device token for a tablet, a staff session
+// for the staff screen. Both disconnect and show a screen; pairing (or
+// signing in) is the only way back from the second, and being revoked
+// mid-night leads there too.
 function useGate() {
   const [missing, setMissing] = useState(false)
+  // Tablet: no good device token. Staff: no good session, and why.
   const [unpaired, setUnpaired] = useState(false)
+  const [signedOut, setSignedOut] = useState(() => (route.staff && !getStaffSession() ? 'none' : null))
   useEffect(() => {
+    const refuse = (reason) => {
+      socket.disconnect()
+      if (route.staff) {
+        clearStaffSession()
+        setSignedOut(reason)
+      } else {
+        clearDeviceToken()
+        setUnpaired(true)
+      }
+    }
     const onError = (error) => {
       if (error?.message === 'Invalid namespace') {
         socket.disconnect()
         setMissing(true)
       } else if (error?.message === 'Unauthorized') {
-        socket.disconnect()
-        clearDeviceToken()
-        setUnpaired(true)
+        refuse('expired')
       }
     }
-    const onRevoked = () => {
-      socket.disconnect()
-      clearDeviceToken()
-      setUnpaired(true)
-    }
+    const onRevoked = () => refuse('revoked')
+    const onSignedOut = ({ reason } = {}) => refuse(reason === 'revoked' ? 'revoked' : 'none')
     socket.on('connect_error', onError)
     socket.on('device:revoked', onRevoked)
+    socket.on('staff:signedOut', onSignedOut)
     return () => {
       socket.off('connect_error', onError)
       socket.off('device:revoked', onRevoked)
+      socket.off('staff:signedOut', onSignedOut)
     }
   }, [])
   const paired = useCallback(() => {
     setUnpaired(false)
     socket.connect()
   }, [])
-  return { missing, unpaired, paired }
+  const signedIn = useCallback(() => {
+    setSignedOut(null)
+    socket.connect()
+  }, [])
+  const signOut = useCallback(() => {
+    socket.disconnect()
+    staffLogout()
+    setSignedOut('none')
+  }, [])
+  return { missing, unpaired, paired, signedOut, signedIn, signOut }
 }
 
 function useToast() {
@@ -442,7 +464,7 @@ function StaffNav({ view, onChange }) {
       {[
         ['tickets', 'Tickets'],
         ['floorplan', 'Floor plan'],
-        ['devices', 'Devices']
+        ['devices', 'Devices & staff']
       ].map(([id, label]) => (
         <button
           key={id}
@@ -459,12 +481,31 @@ function StaffNav({ view, onChange }) {
   )
 }
 
-function StaffApp() {
+// Who is signed in, and the way out. Sits next to the tab strip on every
+// staff screen.
+function SignedIn({ name, onSignOut }) {
+  return (
+    <div className="flex items-center gap-2 text-xs text-dim">
+      <span>
+        Signed in as <span className="font-bold text-chalk">{name}</span>
+      </span>
+      <span className="text-edge">·</span>
+      <button type="button" className="font-bold text-gold" onClick={onSignOut}>
+        Sign out
+      </button>
+    </div>
+  )
+}
+
+function StaffApp({ onSignOut }) {
   const [tickets, setTickets] = useState([])
   const [floorplan, setFloorplan] = useState(null)
   const [floor, setFloor] = useState([])
   const [devices, setDevices] = useState([])
+  const [users, setUsers] = useState([])
+  const [me, setMe] = useState(() => ({ name: getStaffSession()?.name ?? 'Staff' }))
   const [view, setView] = useState('tickets')
+  const [toast, showToast] = useToast()
 
   useReloadPolicy(false)
 
@@ -476,27 +517,49 @@ function StaffApp() {
       setFloor(payload.floor ?? [])
     }
     const onDevices = (payload) => setDevices(payload.devices ?? [])
+    const onUsers = (payload) => {
+      setUsers(payload.users ?? [])
+      if (payload.me) setMe(payload.me)
+    }
+    const onError = ({ message }) => showToast(message)
 
     socket.on('connect', join)
     socket.on('staff:sync', onSync)
     socket.on('staff:devices', onDevices)
+    socket.on('staff:users', onUsers)
+    socket.on('app:error', onError)
     if (socket.connected) join()
 
     return () => {
       socket.off('connect', join)
       socket.off('staff:sync', onSync)
       socket.off('staff:devices', onDevices)
+      socket.off('staff:users', onUsers)
+      socket.off('app:error', onError)
     }
-  }, [])
+  }, [showToast])
 
-  const nav = <StaffNav view={view} onChange={setView} />
+  const nav = (
+    <div className="flex flex-wrap items-center gap-4">
+      <SignedIn name={me.name} onSignOut={onSignOut} />
+      <StaffNav view={view} onChange={setView} />
+    </div>
+  )
 
   return (
     <Shell>
       {view === 'tickets' ? (
         <Staff tickets={tickets} nav={nav} onDeliver={(ticketId) => socket.emit('staff:deliver', { ticketId })} />
       ) : view === 'devices' ? (
-        <Devices devices={devices} nav={nav} onRevoke={(id) => socket.emit('staff:revokeDevice', { id })} />
+        <Devices
+          devices={devices}
+          users={users}
+          me={me}
+          nav={nav}
+          onRevoke={(id) => socket.emit('staff:revokeDevice', { id })}
+          onAddUser={(user) => socket.emit('staff:addUser', user)}
+          onRevokeUser={(id) => socket.emit('staff:revokeUser', { id })}
+        />
       ) : (
         <div className="relative z-10 flex h-full flex-col">
           <header className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
@@ -514,12 +577,13 @@ function StaffApp() {
           </div>
         </div>
       )}
+      {toast && <Toast key={toast.id} toast={toast} />}
     </Shell>
   )
 }
 
 export default function App() {
-  const { missing, unpaired, paired } = useGate()
+  const { missing, unpaired, paired, signedOut, signedIn, signOut } = useGate()
 
   useEffect(() => {
     if (!route.slug) redirectToDefault(route.staff).catch(console.error)
@@ -546,5 +610,12 @@ export default function App() {
       </Shell>
     )
   }
-  return route.staff ? <StaffApp /> : <TabletApp />
+  if (route.staff && signedOut) {
+    return (
+      <Shell>
+        <StaffLogin reason={signedOut} onSignedIn={signedIn} />
+      </Shell>
+    )
+  }
+  return route.staff ? <StaffApp onSignOut={signOut} /> : <TabletApp />
 }

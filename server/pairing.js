@@ -1,5 +1,8 @@
 import { randomInt, timingSafeEqual } from 'node:crypto'
 import { hashToken } from './db/devices.js'
+import { createRateLimiter } from './ratelimit.js'
+
+export { createRateLimiter }
 
 // Tablet pairing. A tablet is admitted to a venue's namespace only with a
 // device token that venue's staff issued. Staff ask for a six-digit code from
@@ -11,35 +14,13 @@ import { hashToken } from './db/devices.js'
 
 export const CODE_TTL = 5 * 60_000
 export const CODE_LENGTH = 6
-// Guesses allowed per minute, per IP and per room. Six digits and ten guesses
-// a minute puts a brute force at years, and staff can always mint a new code.
+// Guesses allowed per minute, per IP and per room (see ratelimit.js). Six
+// digits and ten guesses a minute puts a brute force at years, and staff can
+// always mint a new code.
 export const GUESS_LIMIT = 10
 export const GUESS_WINDOW = 60_000
 // last_seen_at is written at most this often per device.
 export const TOUCH_EVERY = 60_000
-
-/* ------------------------------------------------------------ limiter --- */
-
-// Sliding window over timestamps, keyed by whatever the caller likes. `hit`
-// records an attempt and says whether it was over the line.
-export function createRateLimiter({ limit = GUESS_LIMIT, window = GUESS_WINDOW } = {}) {
-  const hits = new Map()
-  return {
-    hit(key, now = Date.now()) {
-      const list = (hits.get(key) ?? []).filter((at) => now - at < window)
-      list.push(now)
-      hits.set(key, list)
-      return list.length > limit
-    },
-    // Keys nobody has touched for a window are dropped, so a busy night does
-    // not grow the map forever.
-    sweep(now = Date.now()) {
-      for (const [key, list] of hits) {
-        if (!list.some((at) => now - at < window)) hits.delete(key)
-      }
-    }
-  }
-}
 
 /* -------------------------------------------------------------- codes --- */
 
@@ -48,7 +29,7 @@ export function createRateLimiter({ limit = GUESS_LIMIT, window = GUESS_WINDOW }
 // digits were right.
 export function createPairingStore({ ttl = CODE_TTL } = {}) {
   const codes = new Map() // code -> { expiresAt }
-  const guesses = createRateLimiter()
+  const guesses = createRateLimiter({ limit: GUESS_LIMIT, window: GUESS_WINDOW })
   // deviceId -> last time we wrote last_seen_at
   const touched = new Map()
 
@@ -102,21 +83,13 @@ export function createPairingStore({ ttl = CODE_TTL } = {}) {
 
 /* ---------------------------------------------------------- handshake --- */
 
-// The namespace middleware's half. Resolves with the device (or null when the
-// socket needs none) and rejects with 'Unauthorized' when the venue requires
-// a token and this socket has no good one.
-//
-// TEMPORARY: a handshake carrying `auth.staff === true` is admitted with no
-// token at all. Staff login is the next piece of work; until it lands this is
-// the hook it will replace, and it means the staff URL is still open.
+// The namespace middleware's half for tablets. Resolves with the device (or
+// null when the socket needs none) and rejects with 'Unauthorized' when the
+// venue requires a token and this socket has no good one. Staff sockets never
+// come through here: a handshake carrying `auth.staff` goes to staff.js.
 export async function authenticate(room, socket) {
   const auth = socket.handshake?.auth ?? {}
   const required = Boolean(room.venue.requirePairing)
-
-  if (auth.staff === true) {
-    socket.data.staff = true
-    return null
-  }
 
   const token = typeof auth.token === 'string' ? auth.token : ''
   let device = null
@@ -145,7 +118,7 @@ export async function authenticate(room, socket) {
 
 /* ------------------------------------------------------------- staff --- */
 
-// What the staff Devices tab shows: every unrevoked device for the venue,
+// What the staff Devices & staff tab shows: every unrevoked device for the venue,
 // with whether a socket is holding it right now.
 export async function deviceList(room) {
   const devices = await room.repos.devices.list(room.venue.slug)
@@ -181,7 +154,7 @@ export function kickDevice(room, deviceId) {
 // The one route that hands out a token. Rate-limited per IP across every
 // venue and per room, and the code is burnt the moment it is accepted.
 export function pairHandler({ roomFor }) {
-  const perIp = createRateLimiter()
+  const perIp = createRateLimiter({ limit: GUESS_LIMIT, window: GUESS_WINDOW })
   return async (req, res) => {
     const room = roomFor(String(req.params.slug ?? ''))
     if (!room) return res.status(404).json({ error: 'NO_VENUE' })

@@ -49,7 +49,7 @@ Or skip the game entirely and send a round, which goes straight to the bar on th
 
 ## Staff screen
 
-`/staff` has three tabs.
+`/staff` is behind a login — each venue has its own staff accounts — and has three tabs.
 
 ![The staff ticket queue](docs/screenshots/staff-tickets.png)
 
@@ -64,11 +64,13 @@ connected tablet in that venue. Selecting a table shows its tab and its activity
 takes a confirmation listing what's about to go. A stuck tablet can be restarted from here, one
 at a time or all at once, and a tablet that crashed on its own says so in its activity.
 
-**Devices** — the tablets staff have paired with this venue. In production a tablet can't join
-a venue until staff press **Pair a tablet** (here or in the floor plan editor's header), read the
-six-digit code off the screen, and type it into the tablet. The list shows each device's label,
-when it was last seen, and a Revoke button that drops it on the spot. See
-[pairing](docs/FEATURES.md#pairing).
+**Devices & staff** — the tablets staff have paired with this venue, and the accounts that can
+sign in. In production a tablet can't join a venue until staff press **Pair a tablet** (here or
+in the floor plan editor's header), read the six-digit code off the screen, and type it into
+the tablet. The list shows each device's label, when it was last seen, and a Revoke button that
+drops it on the spot. Below it, every staff account with when it last signed in, a Revoke that
+signs them out everywhere, and a form to add the next one. See
+[pairing](docs/FEATURES.md#pairing) and [staff login](docs/FEATURES.md#staff-login).
 
 Every build carries a version, and a tablet still running an older one is told to reload the
 next time it connects — at its next idle moment, never mid-game. See
@@ -119,7 +121,9 @@ kept in memory.
 A guest tablet needs a device token to join a venue — staff issue one by pairing it with a
 six-digit code — so knowing a venue's URL isn't enough to put items on a real tab. Pairing is
 enforced when `NODE_ENV=production` (or per venue with `requirePairing` in the venue row); the
-dev server leaves it off. The staff screen itself has no login yet; that's next.
+dev server leaves it off. The staff screen needs a staff session: an email and password per
+venue (`staff_users`, or `data/venues/<slug>/staff.json`), checked at the socket handshake, so
+the staff URL on its own runs nothing.
 
 Live state — who's seated, challenges, games, chat — lives in memory. What has to outlive a
 deploy goes through a small repository layer (`server/db/`): venues, floor plans and tickets.
@@ -141,8 +145,23 @@ npm run dev
 
 `npm run dev` prints every venue with a LAN address, which is what the tablets actually point at.
 
+The staff screen asks you to sign in. On the dev server a venue with no staff accounts yet
+offers **Continue (dev)** instead, so the first run is one click; add an account from the
+Devices & staff tab (or below) and that door closes.
+
+### The first staff user
+
 ```sh
-npm test            # game rules, venue isolation, persistence, pairing, restarts — no database needed
+npm run staff:add -- demo owner@example.com Sam
+```
+
+Prompts for a password (or reads `STAFF_PASSWORD`) and writes the account to whichever store
+the server uses — `data/venues/demo/staff.json`, or Postgres when `DATABASE_URL` is set. Once
+one account exists, the rest are added from the staff screen. In production this is the only
+way in: a venue with no accounts has no staff screen.
+
+```sh
+npm test            # game rules, venue isolation, persistence, pairing, staff login, restarts — no database needed
 npm run test:e2e    # browser tests: tablets and staff screen, in Chromium
 npm run build       # production client bundle
 npm start           # serve the built client from the node server
@@ -165,15 +184,16 @@ npm start           # migrations in server/db/migrations/ run at boot
 the Postgres backend run only when `DATABASE_URL` is set, and are skipped otherwise.
 
 On Fly, `fly secrets set DATABASE_URL=...` and deploy; no volume is needed. Then
-`fly ssh console -C "npm run seed"` once.
+`fly ssh console -C "npm run seed"` once, and
+`fly ssh console -C "STAFF_PASSWORD=... npm run staff:add -- <slug> <email> <name>"` per venue.
 
 ### Browser tests
 
 `npm run test:e2e` runs the Playwright suite in `e2e/`. It builds the client, starts the
-production server on port 3457 with a throwaway `DATA_DIR` holding two venues, and drives
-real tablets — each one a browser context with its own localStorage and socket — through
-claiming a table, challenging, playing, chatting, gifting, the staff ticket board and the
-floor plan editor, plus cross-venue isolation. Chromium is the only browser; install it once
+production server on port 3457 with a throwaway `DATA_DIR` holding two venues (each seeded
+with one staff account), and drives real tablets — each one a browser context with its own
+localStorage and socket — through claiming a table, challenging, playing, chatting, gifting,
+the staff login, the staff ticket board and the floor plan editor, plus cross-venue isolation. Chromium is the only browser; install it once
 with `npx playwright install chromium`. The plan is in [`docs/plans/e2e.md`](docs/plans/e2e.md).
 
 ## Layout
@@ -184,6 +204,8 @@ server/
   venues.js       the venue list: slug, name, menu, bot tables
   handlers.js     lobby, challenges, games, tickets — one room per venue
   pairing.js      pairing codes, the device-token handshake, POST /api/venue/:slug/pair
+  staff.js        staff sessions, the staff handshake, /api/venue/:slug/staff/{login,logout,status}
+  ratelimit.js    the sliding-window limiter pairing and login share
   state.js        createRoom(): per-venue in-memory tables/games/tickets/chat
   snapshot.js     a room written down for a restart, and read back
   shutdown.js     SIGTERM: suspend every room, tell the tablets, close, exit
@@ -193,13 +215,14 @@ server/
   games/          one module per game, plus rng + shared race logic
 scripts/
   seed.js         put docs/venues.example.json into Postgres on a first deploy
+  staff-add.js    the first staff account for a venue
 src/
   screens/        lobby, game host, per-game screens, result, staff
   components/     board, chrome, icons
   styles/         Tailwind v4 theme and per-game CSS
 e2e/
-  helpers.js      tablets as browser contexts, the hold-to-assign gesture
-  *.spec.js       routes, claim, challenge, chat, gift, floor plan, isolation
+  helpers.js      tablets as browser contexts, the staff sign-in, the hold-to-assign gesture
+  *.spec.js       routes, claim, challenge, chat, gift, floor plan, isolation, staff login
   serve.mjs       builds the client and starts the server for the suite
 ```
 

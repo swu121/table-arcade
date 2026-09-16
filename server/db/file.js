@@ -3,6 +3,7 @@ import path from 'node:path'
 import { normalise } from '../venues.js'
 import { createMemoryTickets } from './memory.js'
 import { createDevicesRepo } from './devices.js'
+import { createStaffRepo } from './staff.js'
 
 // What the server did before there was a database: venues in
 // <dataDir>/venues.json, each venue's layout in
@@ -16,6 +17,7 @@ export function createFileRepos(dataDir) {
   const planFile = (slug) => path.join(dataDir, 'venues', slug, 'floorplan.json')
   const devicesFile = (slug) => path.join(dataDir, 'venues', slug, 'devices.json')
   const snapshotFile = (slug) => path.join(dataDir, 'venues', slug, 'snapshot.json')
+  const staffFile = (slug) => path.join(dataDir, 'venues', slug, 'staff.json')
 
   function readJson(file) {
     try {
@@ -52,22 +54,28 @@ export function createFileRepos(dataDir) {
     }
   }
 
-  const deviceRecords = (slug) => {
-    const raw = readJson(devicesFile(slug))
-    return Array.isArray(raw) ? raw.filter((d) => d && typeof d.id === 'string') : []
-  }
-
-  const deviceStore = {
-    all: () => venueDirs().flatMap((slug) => deviceRecords(slug).map((d) => ({ ...d, venue: slug }))),
-    put: (record) => {
-      const list = deviceRecords(record.venue)
-      const at = list.findIndex((d) => d.id === record.id)
-      const { venue: _venue, ...entry } = record
-      if (at === -1) list.push(entry)
-      else list[at] = entry
-      writeJson(devicesFile(record.venue), list)
+  // One JSON list per venue, keyed by id, the venue implied by the directory.
+  // Devices and staff users both live this way.
+  function perVenueStore(fileFor) {
+    const records = (slug) => {
+      const raw = readJson(fileFor(slug))
+      return Array.isArray(raw) ? raw.filter((r) => r && typeof r.id === 'string') : []
+    }
+    return {
+      all: () => venueDirs().flatMap((slug) => records(slug).map((r) => ({ ...r, venue: slug }))),
+      put: (record) => {
+        const list = records(record.venue)
+        const at = list.findIndex((r) => r.id === record.id)
+        const { venue: _venue, ...entry } = record
+        if (at === -1) list.push(entry)
+        else list[at] = entry
+        writeJson(fileFor(record.venue), list)
+      }
     }
   }
+
+  const deviceStore = perVenueStore(devicesFile)
+  const staffStore = perVenueStore(staffFile)
 
   return {
     backend: 'file',
@@ -114,6 +122,8 @@ export function createFileRepos(dataDir) {
         fs.rmSync(snapshotFile(slug), { force: true })
       }
     },
+
+    staff: createStaffRepo(staffStore),
 
     async close() {}
   }

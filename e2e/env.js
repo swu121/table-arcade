@@ -20,6 +20,10 @@ export const VENUES = [
   { slug: 'annex', name: 'The Annex', botTables: [], requirePairing: false }
 ]
 
+// The staff login is enforced in production, so the launcher seeds this user
+// into every venue and the staff helper signs in with it.
+export const STAFF = { email: 'sam@example.com', password: 'correct horse', name: 'Sam' }
+
 // Every tablet is a landscape tablet.
 export const contextOptions = {
   baseURL: BASE_URL,
