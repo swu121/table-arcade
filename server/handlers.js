@@ -23,7 +23,7 @@ const BOT_ACCEPT_DELAY = 1500
 // so a tablet in one restaurant has no handle on another restaurant at all.
 export const NAMESPACE = /^\/venue\/([a-z0-9-]+)$/
 
-export function init(io, { dataDir = null, venues: list = null } = {}) {
+export function init(io, { dataDir = null, venues: list = null, version = 'dev' } = {}) {
   const venues = createVenueRegistry(list ? normalise(list) : loadVenues(dataDir))
   const rooms = new Map()
 
@@ -32,30 +32,66 @@ export function init(io, { dataDir = null, venues: list = null } = {}) {
     if (room) return room
     const venue = venues.get(slug)
     if (!venue) return null
+    const nsp = io.of(`/venue/${slug}`)
     room = createRoom({
       venue,
-      nsp: io.of(`/venue/${slug}`),
+      nsp,
       plans: createPlanStore(dataDir ? path.join(dataDir, 'venues', slug, 'floorplan.json') : null)
     })
     rooms.set(slug, room)
+    // Handlers go on the venue's own namespace, not the dynamic parent: a
+    // namespace made here before its first socket (a crash report, a startup
+    // rehydrate) is a plain one, and a parent's listeners never reach it.
+    nsp.on('connection', (socket) => {
+      onConnection(room, socket)
+      // A tablet built from an older deploy reconnects to the new server just
+      // fine, which is exactly the problem: it keeps running yesterday's code
+      // until something makes it fetch today's. The client decides when.
+      if (version !== 'dev' && socket.handshake.auth?.version !== version) {
+        socket.emit('app:reload', { reason: 'version', urgent: false })
+      }
+    })
     return room
   }
 
-  const parent = io.of((name, _auth, next) => {
+  // Namespaces are minted on demand from the slug: making the room first means
+  // the namespace already exists, with its handlers, by the time the socket
+  // is let in. An unknown slug is refused at the handshake.
+  io.of((name, _auth, next) => {
     const slug = name.match(NAMESPACE)?.[1]
-    next(null, Boolean(slug && venues.get(slug)))
-  })
-
-  parent.on('connection', (socket) => {
-    const room = roomFor(socket.nsp.name.match(NAMESPACE)[1])
-    if (!room) return socket.disconnect(true)
-    onConnection(room, socket)
+    next(null, Boolean(slug && roomFor(slug)))
   })
 
   const sweeper = setInterval(() => rooms.forEach(sweep), 10_000)
   sweeper.unref()
 
-  return { venues, roomFor, rooms, stop: () => clearInterval(sweeper) }
+  return { venues, roomFor, rooms, version, reportClientError, stop: () => clearInterval(sweeper) }
+}
+
+// A tablet's own account of what went wrong, posted over HTTP because the
+// socket may be the thing that died. It goes to the log, and to the table's
+// activity so staff can see "crashed" next to the one they're being asked
+// about.
+export function reportClientError(room, payload = {}) {
+  const number = Number(payload.table)
+  const table = Number.isInteger(number) ? room.tables.get(number) : null
+  const message = String(payload.message ?? 'unknown error').slice(0, 300)
+  const entry = {
+    venue: room.venue.slug,
+    table: table ? table.number : null,
+    version: String(payload.version ?? '').slice(0, 40),
+    kind: String(payload.kind ?? 'error').slice(0, 20),
+    message,
+    url: String(payload.url ?? '').slice(0, 200),
+    stack: String(payload.stack ?? '').slice(0, 2000)
+  }
+  console.warn(`client-error ${entry.venue}${entry.table ? ` table ${entry.table}` : ''} ${entry.kind}: ${entry.message}`)
+  if (entry.stack) console.warn(entry.stack)
+  if (table && !table.isBot) {
+    log(table, { kind: 'crash', message, errorKind: entry.kind })
+    syncStaff(room)
+  }
+  return entry
 }
 
 /* ---------------------------------------------------------------- sync --- */
@@ -1071,6 +1107,25 @@ function onConnection(room, socket) {
     if (!table) return
     wipeTable(room, table)
     syncAll(room)
+  })
+
+  // Staff-side restarts for tablets. One tablet is a person standing at it
+  // saying it's stuck, so it goes now. All of them is a push after a deploy or
+  // a bad night, and each tablet picks its own quiet moment.
+  socket.on('staff:reloadTable', ({ number } = {}) => {
+    const table = room.tables.get(Number(number))
+    const target = socketFor(room, table)
+    if (!target) return
+    log(table, { kind: 'reload' })
+    target.emit('app:reload', { reason: 'staff', urgent: true })
+    syncStaff(room)
+  })
+
+  socket.on('staff:reloadAll', () => {
+    for (const other of room.nsp.sockets.values()) {
+      if (other.rooms.has('staff')) continue
+      other.emit('app:reload', { reason: 'staff', urgent: false })
+    }
   })
 
   socket.on('staff:savePlan', ({ plan } = {}) => {

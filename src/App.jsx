@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { socket, TABLE_KEY } from './socket.js'
 import { route, redirectToDefault } from './venue.js'
 import { useWakeLock } from './useWakeLock.js'
+import { useReloadPolicy } from './lib/reload.js'
 import { Backdrop, OfflineBanner, Toast } from './components/Bits.jsx'
 import { Mark, Wordmark } from './components/Logo.jsx'
 import { Setup } from './screens/Setup.jsx'
@@ -108,6 +109,12 @@ function TabletApp() {
   const claimed = useRef(null)
 
   useWakeLock()
+
+  // A reload restores the table number but not the screen, so it only happens
+  // while there is nothing on screen worth keeping.
+  useReloadPolicy(
+    Boolean(sync?.game || sync?.challenge || sync?.lastResult || chatWith !== null || wagerTarget || giftTarget)
+  )
 
   useEffect(() => {
     const stored = Number(localStorage.getItem(TABLE_KEY))
@@ -300,7 +307,19 @@ function TabletApp() {
       <Launch self={sync.self} onSignIn={() => socket.emit('table:signIn')} onSetup={() => setSetup(true)} />
     )
   } else if (sync.lastResult) {
-    screen = <Result result={sync.lastResult} onDone={() => socket.emit('result:dismiss')} />
+    screen = (
+      <Result
+        result={sync.lastResult}
+        onDone={() => socket.emit('result:dismiss')}
+        onRematch={() => {
+          socket.emit('result:dismiss')
+          setWagerTarget({
+            number: sync.lastResult.opponent,
+            preset: { gameType: sync.lastResult.gameType, itemId: sync.lastResult.item.id }
+          })
+        }}
+      />
+    )
   } else if (sync.game) {
     screen = (
       <Game
@@ -362,6 +381,7 @@ function TabletApp() {
       {wagerTarget && (
         <WagerSheet
           target={wagerTarget}
+          preset={wagerTarget.preset}
           menu={sync.menu}
           games={sync.games}
           onCancel={() => setWagerTarget(null)}
@@ -411,6 +431,8 @@ function StaffApp() {
   const [floorplan, setFloorplan] = useState(null)
   const [floor, setFloor] = useState([])
   const [view, setView] = useState('tickets')
+
+  useReloadPolicy(false)
 
   useEffect(() => {
     const join = () => socket.emit('staff:join')

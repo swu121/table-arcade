@@ -5,7 +5,8 @@ import { networkInterfaces } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Server } from 'socket.io'
-import { init } from './handlers.js'
+import { init, reportClientError } from './handlers.js'
+import { loadVersion } from './version.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const dist = path.join(here, '..', 'dist')
@@ -17,9 +18,20 @@ const app = express()
 const httpServer = createServer(app)
 const io = new Server(httpServer, { cors: { origin: '*' } })
 
-const { venues } = init(io, { dataDir })
+const version = loadVersion(dist)
+const { venues, roomFor } = init(io, { dataDir, version })
 
 app.get('/healthz', (_req, res) => res.type('text').send('ok'))
+app.get('/api/version', (_req, res) => res.json({ version }))
+
+// Tablets report their own crashes here rather than over the socket, since a
+// crash is the one time the socket might not be there.
+app.post('/api/client-error', express.json({ limit: '32kb' }), (req, res) => {
+  const room = roomFor(String(req.body?.venue ?? ''))
+  if (!room) return res.status(404).json({ error: 'NO_VENUE' })
+  reportClientError(room, req.body)
+  res.status(204).end()
+})
 
 // The bare URL is the single-venue demo: it lands on the first venue listed.
 // Vite serves the client in dev, so the client asks for this instead of being
@@ -65,7 +77,7 @@ const PORT = Number(process.env.PORT) || 3000
 httpServer.listen(PORT, '0.0.0.0', () => {
   const dev = process.env.NODE_ENV !== 'production'
   const clientPort = dev ? 5173 : PORT
-  console.log(`\n  TABLE ARCADE  ·  ${dev ? 'development' : 'production'}\n`)
+  console.log(`\n  TABLE ARCADE  ·  ${dev ? 'development' : 'production'}  ·  build ${version}\n`)
   for (const venue of venues.all()) {
     console.log(`  ${venue.name} (${venue.slug})`)
     console.log(`    local    http://localhost:${clientPort}/v/${venue.slug}`)

@@ -61,7 +61,12 @@ delivered" button, with a running total of what's sitting on tabs.
 **Floor plan** — a drag-and-drop editor for the room layout. Tables get dragged, resized,
 renumbered and reshaped; edits save to `data/venues/<slug>/floorplan.json` and push live to every
 connected tablet in that venue. Selecting a table shows its tab and its activity, and clearing it for the next party
-takes a confirmation listing what's about to go.
+takes a confirmation listing what's about to go. A stuck tablet can be restarted from here, one
+at a time or all at once, and a tablet that crashed on its own says so in its activity.
+
+Every build carries a version, and a tablet still running an older one is told to reload the
+next time it connects — at its next idle moment, never mid-game. See
+[the feature reference](docs/FEATURES.md#builds-restarts-and-crashes).
 
 ## How it fits together
 

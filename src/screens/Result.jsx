@@ -69,7 +69,7 @@ function Line({ result }) {
   )
 }
 
-export function Result({ result, onDone }) {
+export function Result({ result, onDone, onRematch }) {
   const copy = COPY[result.outcome] ?? COPY.draw
   const won = result.outcome === 'won'
 
@@ -103,14 +103,16 @@ export function Result({ result, onDone }) {
           <Line result={result} />
         </p>
 
-        <button
-          type="button"
-          className="btn btn-primary anim-fade-up mt-7 h-16 w-full text-lg"
-          style={{ animationDelay: '300ms' }}
-          onClick={onDone}
-        >
-          {copy.cta}
-        </button>
+        <div className="anim-fade-up mt-7 flex gap-3" style={{ animationDelay: '300ms' }}>
+          <button type="button" className="btn btn-ghost h-16 flex-1 text-base" onClick={onDone}>
+            {copy.cta}
+          </button>
+          {onRematch && (
+            <button type="button" className="btn btn-primary h-16 flex-[1.4] text-lg" onClick={onRematch}>
+              {result.outcome === 'lost' ? 'Double or nothing' : 'Rematch'}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

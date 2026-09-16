@@ -70,6 +70,7 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
   const [numberDraft, setNumberDraft] = useState('')
   const [error, setError] = useState('')
   const [confirmReset, setConfirmReset] = useState(false)
+  const [confirmReloadAll, setConfirmReloadAll] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
   const [dragMode, setDragMode] = useState(null)
 
@@ -365,6 +366,18 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
     socket.emit('staff:resetPlan')
   }
 
+  // Restarts, not layout. One tablet restarts on the spot; every tablet
+  // restarts when it next has nothing on screen.
+  const reloadTable = () => {
+    if (!selectedTable) return
+    socket.emit('staff:reloadTable', { number: selectedTable.number })
+  }
+
+  const reloadAll = () => {
+    setConfirmReloadAll(false)
+    socket.emit('staff:reloadAll')
+  }
+
   const inspected = selectedTable ?? selectedFixture
 
   return (
@@ -382,6 +395,21 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
         </div>
 
         <div className="flex items-center gap-2">
+          {confirmReloadAll ? (
+            <>
+              <span className="text-xs text-dim">Every idle tablet restarts; busy ones wait.</span>
+              <button type="button" className="btn btn-ghost h-11 px-4 text-xs" onClick={() => setConfirmReloadAll(false)}>
+                Keep them
+              </button>
+              <button type="button" className="btn btn-danger h-11 px-4 text-xs" onClick={reloadAll}>
+                Restart all tablets
+              </button>
+            </>
+          ) : (
+            <button type="button" className="btn btn-ghost h-11 px-4 text-xs" onClick={() => setConfirmReloadAll(true)}>
+              Restart all tablets
+            </button>
+          )}
           {confirmReset ? (
             <>
               <span className="text-xs text-dim">Discard the whole layout?</span>
@@ -526,6 +554,13 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
                 onClick={() => setConfirmClear(true)}
               >
                 Clear table
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost mt-2 h-11 w-full text-xs"
+                onClick={reloadTable}
+              >
+                Restart tablet
               </button>
             </Section>
           )}

@@ -14,9 +14,11 @@ function Step({ index, label }) {
   )
 }
 
-export function WagerSheet({ target, menu, games, onCancel, onSend }) {
-  const [game, setGame] = useState(null)
-  const [item, setItem] = useState(null)
+// `preset` is the rematch: the last game and stake come in already picked, so
+// the sheet opens ready to send. Either can still be changed.
+export function WagerSheet({ target, preset = null, menu, games, onCancel, onSend }) {
+  const [game, setGame] = useState(() => games.find((g) => g.id === preset?.gameType) ?? null)
+  const [item, setItem] = useState(() => menu.find((m) => m.id === preset?.itemId) ?? null)
 
   const cta = !game ? 'Pick a game first' : !item ? 'Now pick the stake' : `Play ${game.name} for ${item.name}`
 
@@ -25,7 +27,7 @@ export function WagerSheet({ target, menu, games, onCancel, onSend }) {
       <div className="anim-sheet panel flex max-h-full w-full max-w-4xl flex-col overflow-hidden">
         <div className="flex shrink-0 items-center justify-between gap-4 px-6 pt-6">
           <div>
-            <div className="overline">Challenging</div>
+            <div className="overline">{preset ? 'Rematch' : 'Challenging'}</div>
             <div className="display text-4xl leading-none">
               <span className="text-dim">Table</span> <span className="gold-text">{pad(target.number)}</span>
             </div>

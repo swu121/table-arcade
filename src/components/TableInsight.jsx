@@ -31,6 +31,10 @@ function describe(entry) {
       return `${entry.outcome === 'won' ? 'Beat' : 'Lost to'} Table ${other} at ${entry.gameName}`
     case 'gift':
       return entry.direction === 'out' ? `Sent Table ${other} a round` : `Got a round from Table ${other}`
+    case 'crash':
+      return `Tablet app crashed${entry.message ? ` · ${entry.message}` : ''}`
+    case 'reload':
+      return 'Tablet restarted by staff'
     default:
       return entry.kind
   }
@@ -39,7 +43,9 @@ function describe(entry) {
 const TONE = {
   result: 'text-gold',
   gift: 'text-mint',
-  left: 'text-dim'
+  left: 'text-dim',
+  crash: 'text-neon',
+  reload: 'text-dim'
 }
 
 export function ActivityRow({ entry }) {

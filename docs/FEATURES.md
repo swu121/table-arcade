@@ -169,6 +169,11 @@ Win, lose or draw, the result screen names the game, the opponent, the item and 
 — *your tab covers it* or *theirs does*. A draw moves nothing. A win throws confetti. Every
 settled wager creates a ticket on the staff screen; a draw does not.
 
+The result offers two ways out. **Back to the lobby** returns to the thread with the other
+table, where the outcome is already written. **Rematch** — *Double or nothing* for the loser —
+opens the challenge sheet with the same game and stake already picked, so a second round is one
+tap away. Either can still be changed before sending.
+
 ## Gifts
 
 ![Sending a round to another table](screenshots/gift.png)
@@ -251,6 +256,14 @@ listing the tab, the tickets and the activity it is about to destroy first. Clea
 threads, notifications, history, mutes and blocks, and puts the tablet back to its unassigned
 screen for the next party.
 
+**Restart tablet** is for the one somebody is standing at saying it's stuck. It reloads on the
+spot, comes back on the same table, and the restart is written into its activity. The header's
+**Restart all tablets** is the gentler version for after a deploy or a bad night: every tablet
+reloads at its next idle moment, and busy ones wait. The staff screen that pressed it stays put.
+
+If a tablet crashed on its own, the activity says so — `Tablet app crashed · <message>` — so the
+one staff are being asked about carries its own evidence.
+
 ---
 
 # Part 3 — How it works
@@ -296,6 +309,31 @@ nothing a tablet sends can address a table outside its own venue. Connecting to 
 whose slug isn't a venue is refused at the handshake, and the client shows a "no such venue"
 screen instead of retrying.
 
+## Builds, restarts and crashes
+
+Tablets sit open for days and only ever run the code they loaded, so a deploy on its own
+changes nothing on the floor. Every build gets a version — the git commit, or a timestamp —
+stamped into the client bundle and written to `dist/version.json` for the server to read. A
+tablet sends its version in the socket handshake; if it differs from the server's, the server
+asks it to reload. The tablet decides when: not while a game, a challenge, a result or an open
+thread is on screen. Staff restarts use the same channel, marked urgent when a person is standing
+at the tablet. The dev server is always version `dev` on both sides and never asks.
+
+A render crash is caught at the root, reported, and followed by a restart after a moment. Errors
+outside rendering — a handler, a timer, a promise — are reported but left alone, since they
+usually leave the screen intact and a reload mid-game would be worse. Reports go to
+`POST /api/client-error` over plain HTTP, because the socket may be the casualty; the server
+logs them and writes a `crash` entry into the table's activity.
+
+Reloading can loop — a build that crashes on boot, a server that keeps asking — so a tab
+remembers its recent reloads in `sessionStorage` and refuses a fourth inside a minute. When the
+guard trips after a crash, the tablet shows a "keeps going wrong" screen with a restart button
+instead of a blank page.
+
+What a hung main thread cannot do is run any of this. A tablet stuck in a true infinite loop
+stops answering socket.io's pings and drops to *Tablet offline* on the staff plan within about
+half a minute; getting it back is a kiosk-app or physical restart.
+
 ## State
 
 Everything except venue config and floor plans lives in memory, per room. Stopping the process
@@ -312,6 +350,8 @@ clamped on load, falling back to the default plan if the file is missing or malf
 | Bot tables | 12, 17, 20 | `server/state.js`, per venue in `data/venues.json` |
 | Menu and prices | 8 items | `server/state.js`, per venue in `data/venues.json` |
 | Message length / thread / inbox / history | 280 / 200 / 40 / 40 | `server/state.js` |
+| Reload loop guard | 3 reloads per 60s | `src/lib/reload.js` |
+| Crash report rate | 5 per 60s per tablet | `src/lib/crash.js` |
 | Race count-in and ceiling | 3.2s / 120s | `server/games/race.js` |
 | Beer pong bot wobble | 0.11–0.2 | `server/games/beerpong.js` |
 | Default floor plan | 21 tables, 4 fixtures | `server/floorplan.js` |

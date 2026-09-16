@@ -19,6 +19,7 @@ async function boot() {
   await new Promise((resolve) => httpServer.listen(0, resolve))
   const port = httpServer.address().port
   return {
+    app,
     client: (slug) => connect(`http://localhost:${port}/venue/${slug}`, { transports: ['websocket'] }),
     close: async (...clients) => {
       for (const client of clients) client.close()
@@ -129,4 +130,17 @@ test('an unknown venue is refused at the namespace', async (t) => {
   t.after(() => server.close(client))
   const error = await once(client, 'connect_error')
   assert.equal(error.message, 'Invalid namespace')
+})
+
+// A room can exist before anyone connects to it — a startup rehydrate, a crash
+// report over HTTP — and the sockets that arrive later must still be handled.
+test('a room made before its first socket still answers', async (t) => {
+  const server = await boot()
+  const room = server.app.roomFor('north')
+  assert.ok(room)
+  const north = tablet(server, 'north')
+  t.after(() => server.close(north))
+  const sync = await seat(north, 4)
+  assert.equal(sync.self.number, 4)
+  assert.equal(sync.venue.slug, 'north')
 })

@@ -1,13 +1,18 @@
 import { io } from 'socket.io-client'
 import { route } from './venue.js'
+import { APP_VERSION } from './version.js'
 
 // Each venue is its own socket.io namespace. Everything this tablet ever sends
 // lands in that one namespace, so there's no message it could address to a
 // table in another restaurant.
+//
+// The build version rides along on every handshake, so a tablet still running
+// last week's bundle is told so the moment it reconnects to a newer server.
 export const socket = io(`/venue/${route.slug ?? '_'}`, {
   autoConnect: Boolean(route.slug),
   reconnectionDelay: 400,
-  reconnectionDelayMax: 2500
+  reconnectionDelayMax: 2500,
+  auth: { version: APP_VERSION }
 })
 
 // The remembered table number is per venue, so a tablet moved between
