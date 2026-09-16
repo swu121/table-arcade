@@ -20,6 +20,15 @@ export const VENUES = [
   { slug: 'annex', name: 'The Annex', botTables: [], requirePairing: false }
 ]
 
+// The platform operator. The launcher hashes this password into
+// ADMIN_PASSWORD_HASH for the server, so /admin is behind its real login
+// rather than the dev door — production is what this suite runs.
+export const ADMIN = { email: 'ops@example.com', password: 'correct horse staple' }
+
+// The venue 09-admin.spec.js creates through the admin page. It is not in
+// VENUES on purpose: making it is the thing being tested.
+export const ADMIN_VENUE = { slug: 'the-anchor', name: 'The Anchor' }
+
 // The staff login is enforced in production, so the launcher seeds this user
 // into every venue and the staff helper signs in with it.
 export const STAFF = { email: 'sam@example.com', password: 'correct horse', name: 'Sam' }

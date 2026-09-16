@@ -12,6 +12,7 @@
     "db:migrate": "node server/db/migrate.js",
     "seed": "node scripts/seed.js",
     "staff:add": "node scripts/staff-add.js",
+    "admin:hash": "node scripts/admin-hash.js",
     "test": "node --test \"server/**/*.test.js\"",
     "test:e2e": "playwright test"
   },

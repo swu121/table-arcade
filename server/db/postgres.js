@@ -29,30 +29,35 @@ export async function createPostgresRepos(connectionString, { log = () => {} } =
 
     venues: {
       async list() {
-        const { rows } = await query('SELECT slug, name, menu, bot_tables, require_pairing FROM venues ORDER BY id')
+        const { rows } = await query(
+          'SELECT slug, name, menu, bot_tables, require_pairing, archived FROM venues ORDER BY id'
+        )
         return normalise(
           rows.map((r) => ({
             slug: r.slug,
             name: r.name,
             menu: r.menu,
             botTables: r.bot_tables,
-            requirePairing: r.require_pairing ?? undefined
+            requirePairing: r.require_pairing ?? undefined,
+            archived: r.archived === true
           }))
         )
       },
       async upsert(venue) {
         await query(
-          `INSERT INTO venues (slug, name, menu, bot_tables, require_pairing)
-           VALUES ($1, $2, $3::jsonb, $4::integer[], $5)
+          `INSERT INTO venues (slug, name, menu, bot_tables, require_pairing, archived)
+           VALUES ($1, $2, $3::jsonb, $4::integer[], $5, $6)
            ON CONFLICT (slug) DO UPDATE
              SET name = EXCLUDED.name, menu = EXCLUDED.menu, bot_tables = EXCLUDED.bot_tables,
-                 require_pairing = EXCLUDED.require_pairing, updated_at = now()`,
+                 require_pairing = EXCLUDED.require_pairing, archived = EXCLUDED.archived,
+                 updated_at = now()`,
           [
             venue.slug,
             venue.name,
             JSON.stringify(venue.menu ?? []),
             venue.botTables ?? [],
-            typeof venue.requirePairing === 'boolean' ? venue.requirePairing : null
+            typeof venue.requirePairing === 'boolean' ? venue.requirePairing : null,
+            venue.archived === true
           ]
         )
       }

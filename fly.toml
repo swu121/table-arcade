@@ -19,6 +19,15 @@ kill_timeout = "10s"
   # the venues from docs/venues.example.json. Without it the server falls back
   # to JSON files under data/ (gone on the next deploy) with tickets in memory.
   # There is deliberately no volume.
+  #
+  # ADMIN_EMAIL and ADMIN_PASSWORD_HASH are the platform operator — one login
+  # for the whole server, which is how /admin onboards a restaurant without a
+  # deploy. Both are secrets:
+  #   npm run admin:hash
+  #   fly secrets set ADMIN_EMAIL=you@example.com ADMIN_PASSWORD_HASH='scrypt:...'
+  # The hash is the same scrypt:N:r:p:salt:hash format staff passwords use.
+  # With neither set, a production server has no /admin at all (it 404s and
+  # says so once at boot); outside production, /admin is simply open.
 
 [http_service]
   internal_port = 3000

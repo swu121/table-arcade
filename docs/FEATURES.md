@@ -220,7 +220,8 @@ games, reply to messages in character, and say thanks for a round.
 # Part 2 — The staff side
 
 The staff screen lives at `/staff`, behind a login, and has three tabs: tickets, the floor
-plan editor, and the venue's paired tablets and staff accounts.
+plan editor, and the venue's paired tablets and staff accounts. Above all of them is `/admin`,
+where whoever runs the server onboards the restaurants in the first place.
 
 ## Signing in
 
@@ -300,6 +301,29 @@ drops their screens at once. The last account cannot be revoked — that would l
 **Add staff** takes a name, an email and a password of at least eight characters; the email has
 to be new to this venue.
 
+## Admin
+
+`/admin` belongs to the **platform operator** — one identity for the whole server, not a
+venue's staff — and it is the whole of onboarding a restaurant. The left column lists every
+venue with its address and how many screens are connected to it right now, refreshed while the
+page is open; under it is **New venue**: a name, an address suggested from that name and still
+editable, whether tablets have to be paired, and which table numbers the bots sit at. Creating
+one puts it on the running server — the next tablet to open `/v/<slug>` reaches it, with
+nothing edited and nothing restarted.
+
+Picking a venue opens it. Its name and bot tables are editable; pairing is a switch; the menu
+is a list of rows with a name, a price and an icon chosen from the same set the tablets draw,
+and saving it reaches every connected tablet on its next sync (a game already running keeps
+the item it was played for). Below that, **the first staff account** — the one thing a new
+venue cannot do for itself, since its staff screen has nobody to let in yet — and **Issue
+pairing code**, the same six-digit, five-minute, single-use code the staff screen mints, so
+the first tablet can be paired before anyone with a staff screen is on site. The venue's
+tablet and staff URLs are links. **Archive** is the way a venue goes away: there is no delete,
+and an archived one is refused at its address while everything it owns stays where it is.
+
+The page holds no socket. An operator is not standing on anybody's floor, so everything it
+does is a plain HTTP call.
+
 ---
 
 # Part 3 — How it works
@@ -335,9 +359,65 @@ without streaming any geometry between them. The seed is the only thing that cro
 ## Venues
 
 The server hosts many restaurants at once. The venue store lists them (a Postgres table, or
-`data/venues.json` without a database); each entry is `{ slug, name, menu?, botTables? }`,
-with the demo defaults filling anything left out. Tablets
-load `/v/<slug>`, staff load `/v/<slug>/staff`, and the bare URL redirects to the first venue.
+`data/venues.json` without a database); each entry is
+`{ slug, name, menu?, botTables?, requirePairing?, archived? }`, with the demo defaults filling
+anything left out. Tablets load `/v/<slug>`, staff load `/v/<slug>/staff`, the operator loads
+`/admin`, and the bare URL redirects to the first venue that is not archived.
+
+**The registry is live.** `createVenueRegistry` in `server/venues.js` is read at boot but not
+frozen: `add(venue)` appends one and `update(slug, patch)` re-validates a patch through the
+same `normalise` every stored row goes through and writes the result *into the existing venue
+object* — the same object every live room holds as `room.venue`. So a rename or a new menu is
+already true for the room; what is left is telling the screens, which `init()`'s `updateVenue`
+does with `syncAll(room)` (and it seats or dismisses bot tables to match, leaving any bot
+mid-game alone). `addVenue` needs even less: `roomFor` mints a namespace the first time a slug
+is asked for, so a venue created at 7pm is joinable at 7pm. Both write through to
+`repos.venues.upsert`, which is what makes the change survive the next restart — `venues.json`
+for the file backend, the `venues` table for Postgres.
+
+**Archiving** is the only way a venue stops. There is no delete: a closed restaurant still has
+floor plans, tickets, paired tablets and staff accounts worth keeping, and a slug worth never
+handing to anyone else. `archived: true` makes `venues.get` and `venues.all` step over it, so
+`roomFor` returns null and the handshake refuses it exactly like a slug nobody ever set up —
+including on a namespace that already exists, which is checked in the middleware so archiving a
+busy venue closes the door at once. It drops out of `venues.default()` too. `venues.find` and
+`venues.every` still see it, which is how `/admin` lists one and opens it again.
+
+## Admin
+
+The platform operator is **two environment variables**, not a row: `ADMIN_EMAIL` and
+`ADMIN_PASSWORD_HASH`, the latter in the same `scrypt:N:r:p:salt:hash` format staff passwords
+are stored in (`npm run admin:hash` prints one from a hidden prompt or `ADMIN_PASSWORD`).
+There is no admin table, no per-venue operator and no password reset — the deploy holds the
+credential.
+
+Three modes, decided from the environment on every request:
+
+| `ADMIN_EMAIL` + `ADMIN_PASSWORD_HASH` | `NODE_ENV` | `/admin` |
+| --- | --- | --- |
+| set | any | the login form |
+| unset | not `production` | open, with a visible "dev mode" note — the staff dev door's sibling |
+| unset | `production` | 404, and one line at boot saying admin is disabled |
+
+`POST /api/admin/login` answers `{ token, expiresAt, email }` — a 32-byte base64url session
+token — or `401 BAD_LOGIN` for a wrong email and a wrong password alike (the scrypt runs either
+way, so the timing says nothing), and `429 TOO_MANY` past ten tries a minute per IP, on the
+same limiter as pairing and staff login. Sessions live in memory keyed by the token's SHA-256,
+one store for the whole server, fourteen days from their last use; a restart signs the operator
+out. `POST …/logout` ends one, `GET …/status` says whether admin is on and whether it is the
+dev door. Everything else needs the session (or the dev door):
+
+| Route | Does |
+| --- | --- |
+| `GET /api/admin/venues` | every venue, archived included: name, pairing, bots, menu, counts of paired devices and staff accounts, and whether the room is live with how many sockets are in it |
+| `POST /api/admin/venues` | creates one — slug checked against `SLUG_PATTERN` and for uniqueness, menu starting from the default `MENU` |
+| `PATCH /api/admin/venues/:slug` | `name`, `requirePairing`, `botTables`, `menu`, `archived`; anything left out is left alone, and the menu is validated exactly as a loaded row is |
+| `POST /api/admin/venues/:slug/staff` | the venue's first staff account, through `repos.staff.create` |
+| `POST /api/admin/venues/:slug/pair-code` | a pairing code out of that venue's own `room.pairing` — the same store the staff screen uses |
+
+It is all plain HTTP JSON. The admin page opens no socket, because it is not on a venue's
+floor; `server/index.js` only mounts the router, and everything above lives in
+`server/admin.js`.
 
 Each venue is a socket.io namespace (`/venue/<slug>`) and a *room*: one `createRoom()` call in
 `server/state.js` that owns that venue's tables, challenges, games, tickets and conversations.
@@ -493,7 +573,7 @@ rolling at the same time cannot both create the tables. It runs at boot and as `
 The first migration also creates `devices` (paired tablets, see [Pairing](#pairing)) and
 `staff_users` (see [Staff login](#staff-login)); the second adds `devices.last_seen_at` and
 `venues.require_pairing`; the third adds `room_snapshots`; the fourth adds `staff_users.name`
-and `last_login_at`. `npm run seed` upserts the venues in `docs/venues.example.json` for a
+and `last_login_at`; the fifth adds `venues.archived`. `npm run seed` upserts the venues in `docs/venues.example.json` for a
 first deploy, and `npm run staff:add` makes a venue's first staff account.
 
 The in-memory backend behind the tests has the same interface, so every test runs without a
@@ -513,6 +593,7 @@ and are skipped otherwise.
 | Reload loop guard | 3 reloads per 60s | `src/lib/reload.js` |
 | Pairing code life / guesses / last-seen writes | 5 min, once / 10 per min per IP and room / once per min | `server/pairing.js` |
 | Staff session life / login tries / password length | 14 days, sliding / 10 per min per IP and venue / 8+ | `server/staff.js`, `server/db/staff.js` |
+| Admin session life / login tries | 14 days, sliding / 10 per min per IP | `server/admin.js` |
 | Crash report rate | 5 per 60s per tablet | `src/lib/crash.js` |
 | Race count-in and ceiling | 3.2s / 120s | `server/games/race.js` |
 | Beer pong bot wobble | 0.11–0.2 | `server/games/beerpong.js` |
@@ -531,14 +612,20 @@ by omission:
   snapshot that is read once and thrown away; that is a courtesy to whoever is mid-game, not a
   record. A crash still loses the night.
 - **No accounts for guests.** Tables are identified by number and tablets by a device token
-  staff issue when pairing; staff sign in with a per-venue email and password. There are no
-  roles beyond "staff" — everyone who can sign in can do everything, including add and revoke
-  other staff — and no password reset: a forgotten password is a revoke and a new account.
-  Staff sessions live in memory, so a deploy signs everyone out.
+  staff issue when pairing; staff sign in with a per-venue email and password; the platform
+  operator is a single email and password hash in the deploy's environment. There are no roles
+  beyond "staff" — everyone who can sign in can do everything, including add and revoke other
+  staff — no second operator, and no password reset anywhere: a forgotten staff password is a
+  revoke and a new account, and a forgotten operator password is a new `ADMIN_PASSWORD_HASH`.
+  Both kinds of session live in memory, so a deploy signs everyone out.
 - **No POS or payments.** "The loser's tab" is a ticket a human acts on, not an integration.
 - **No sound.** Every game is silent.
 - **No stats or leaderboards** for guests, and no analytics for staff beyond the open-ticket
-  total.
+  total. `/admin` counts venues, devices, staff and connected sockets, and nothing over time.
+- **No self-service signup.** A restaurant is onboarded by the operator from `/admin`, not by
+  filling in a form on a marketing page, and there is no billing attached to any of it.
+- **No venue deletion.** Archiving hides one; the rows stay. Removing a restaurant's data for
+  real is a database job.
 
 Open questions a bar owner will reasonably ask, and which v1 does not answer: whether every
 table even has a tab, what POS integration would take, and how the wager should be framed

@@ -130,6 +130,10 @@ const ICONS = {
   fries: Fries
 }
 
+// Every icon a menu item can carry, in the order the admin menu editor offers
+// them. A name that isn't one of these falls back to the beer glass.
+export const ICON_NAMES = Object.keys(ICONS)
+
 export function ItemIcon({ name, size = 32, a = GOLD, b = CHALK, className = '' }) {
   const Glyph = ICONS[name] ?? Beer
   return (

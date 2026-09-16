@@ -38,7 +38,9 @@ export function init(io, { repos = createMemoryRepos(), venues: list = null, ver
 
   function roomFor(slug) {
     let room = rooms.get(slug)
-    if (room) return room
+    // An archived venue is gone as far as the floor is concerned, even when
+    // its room is still warm from earlier tonight.
+    if (room) return room.venue.archived ? null : room
     const venue = venues.get(slug)
     if (!venue) return null
     const nsp = io.of(`/venue/${slug}`)
@@ -70,6 +72,10 @@ export function init(io, { repos = createMemoryRepos(), venues: list = null, ver
     // whereas a held socket is dropped with everyone else and reconnects.
     nsp.use((socket, next) => {
       if (closing) return
+      // The dynamic namespace check only runs the first time a slug is asked
+      // for, so archiving a venue whose namespace already exists has to be
+      // refused here — and it reads as "no such venue", which is the truth.
+      if (room.venue.archived) return next(new Error('Invalid namespace'))
       const gate = socket.handshake.auth?.staff != null ? authenticateStaff : authenticate
       room.ready
         .then(() => gate(room, socket))
@@ -112,7 +118,58 @@ export function init(io, { repos = createMemoryRepos(), venues: list = null, ver
     for (const room of rooms.values()) room.nsp.emit('app:restarting', { retryIn })
   }
 
-  return { venues, roomFor, rooms, version, reportClientError, suspend, stop: () => clearInterval(sweeper) }
+  // Onboarding a restaurant, on a running server. The registry is live, and
+  // `roomFor` mints a namespace the first time someone asks for the slug, so
+  // there is nothing to restart: the venue is joinable on the next socket.
+  // The write-through is what makes it survive the next restart.
+  async function addVenue(entry) {
+    const venue = venues.add(entry)
+    if (!venue) return null
+    await repos.venues.upsert(venue)
+    return venue
+  }
+
+  // A change to a venue that already exists. `venues.update` writes into the
+  // object the room is holding, so the room needs no telling — but the
+  // tablets and the staff screen do, and the bot tables are the room's.
+  async function updateVenue(slug, patch) {
+    const venue = venues.update(slug, patch)
+    if (!venue) return null
+    await repos.venues.upsert(venue)
+    const room = rooms.get(venue.slug)
+    if (room) {
+      reseatBots(room)
+      syncAll(room)
+    }
+    return venue
+  }
+
+  return {
+    venues,
+    roomFor,
+    rooms,
+    version,
+    reportClientError,
+    suspend,
+    addVenue,
+    updateVenue,
+    stop: () => clearInterval(sweeper)
+  }
+}
+
+// The venue's bot tables, against the room's. New ones sit down; ones that
+// have been taken off the list leave, unless they are mid-anything — a bot
+// halfway through a game is finishing it, list or no list.
+function reseatBots(room) {
+  const wanted = new Set(room.venue.botTables)
+  for (const number of wanted) {
+    if (!room.tables.has(number)) room.tables.set(number, makeTable(number, true))
+  }
+  for (const table of [...room.tables.values()]) {
+    if (!table.isBot || wanted.has(table.number)) continue
+    if (table.challengeId || table.gameId) continue
+    room.tables.delete(table.number)
+  }
 }
 
 // A tablet's own account of what went wrong, posted over HTTP because the
