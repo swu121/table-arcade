@@ -1,5 +1,5 @@
 app = "tablearcade"
-primary_region = "sea"
+primary_region = "sjc"
 
 # A deploy is SIGTERM, then this long before the machine is killed. The server
 # uses it to snapshot every room (games, challenges, threads, who's seated) to
