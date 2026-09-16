@@ -11,7 +11,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server
-COPY scripts/seed.js ./scripts/seed.js
+# seed.js, staff-add.js and admin-hash.js all run over `fly ssh console`, and
+# a venue's first staff account is only reachable that way.
+COPY scripts ./scripts
 COPY docs/venues.example.json ./docs/venues.example.json
 COPY --from=build /app/dist ./dist
 EXPOSE 3000
