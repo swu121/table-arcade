@@ -13,8 +13,8 @@ import {
 } from './state.js'
 import { getGame, gameMenu, DEFAULT_GAME } from './games/index.js'
 import { createPlanStore } from './floorplan.js'
-import { createVenueRegistry, loadVenues, normalise } from './venues.js'
-import path from 'node:path'
+import { createVenueRegistry, venueList } from './venues.js'
+import { createMemoryRepos } from './db/index.js'
 
 const BOT_ACCEPT_DELAY = 1500
 
@@ -23,8 +23,12 @@ const BOT_ACCEPT_DELAY = 1500
 // so a tablet in one restaurant has no handle on another restaurant at all.
 export const NAMESPACE = /^\/venue\/([a-z0-9-]+)$/
 
-export function init(io, { dataDir = null, venues: list = null } = {}) {
-  const venues = createVenueRegistry(list ? normalise(list) : loadVenues(dataDir))
+// `venues` is the list the caller loaded (see loadVenues in venues.js); `repos`
+// is where floor plans and tickets go to survive a restart. Without either,
+// this is the single demo venue with nothing kept past the process — which is
+// what the tests want.
+export function init(io, { repos = createMemoryRepos(), venues: list = null } = {}) {
+  const venues = createVenueRegistry(venueList(list))
   const rooms = new Map()
 
   function roomFor(slug) {
@@ -35,8 +39,10 @@ export function init(io, { dataDir = null, venues: list = null } = {}) {
     room = createRoom({
       venue,
       nsp: io.of(`/venue/${slug}`),
-      plans: createPlanStore(dataDir ? path.join(dataDir, 'venues', slug, 'floorplan.json') : null)
+      plans: createPlanStore({ persist: (plan) => repos.floorplans.save(slug, plan) }),
+      repos
     })
+    room.ready = hydrate(room)
     rooms.set(slug, room)
     return room
   }
@@ -44,6 +50,15 @@ export function init(io, { dataDir = null, venues: list = null } = {}) {
   const parent = io.of((name, _auth, next) => {
     const slug = name.match(NAMESPACE)?.[1]
     next(null, Boolean(slug && venues.get(slug)))
+  })
+
+  // Nobody's handlers attach until the room has its plan and open tickets
+  // back, so the first tablet in after a restart sees the same board as the
+  // last one out.
+  parent.use((socket, next) => {
+    const room = roomFor(socket.nsp.name.match(NAMESPACE)[1])
+    if (!room) return next(new Error('Invalid namespace'))
+    room.ready.then(() => next())
   })
 
   parent.on('connection', (socket) => {
@@ -56,6 +71,34 @@ export function init(io, { dataDir = null, venues: list = null } = {}) {
   sweeper.unref()
 
   return { venues, roomFor, rooms, stop: () => clearInterval(sweeper) }
+}
+
+/* --------------------------------------------------------- persistence --- */
+
+// What the repository kept for this venue, back into the room. Either half
+// failing leaves the room on its defaults rather than refusing the night.
+async function hydrate(room) {
+  const { repos, venue } = room
+  try {
+    const plan = await repos.floorplans.get(venue.slug)
+    if (plan) room.plans.load(plan)
+  } catch (error) {
+    console.warn(`db: could not load the floor plan for ${venue.slug} —`, error.message)
+  }
+  try {
+    for (const ticket of await repos.tickets.openFor(venue.slug)) room.tickets.set(ticket.id, ticket)
+  } catch (error) {
+    console.warn(`db: could not load open tickets for ${venue.slug} —`, error.message)
+  }
+}
+
+// Durable writes ride behind the broadcast. The room's Map is what staff see
+// tonight; the repository is what they see after a restart. A failed write is
+// logged with enough to find it, never thrown into a socket handler.
+function keep(room, what, write) {
+  Promise.resolve()
+    .then(write)
+    .catch((error) => console.warn(`db: ${what} failed for ${room.venue.slug} —`, error.message))
 }
 
 /* ---------------------------------------------------------------- sync --- */
@@ -414,6 +457,7 @@ function wipeTable(room, table) {
   for (const [id, ticket] of room.tickets) {
     if (ticket.owingTable === table.number || ticket.owedToTable === table.number) room.tickets.delete(id)
   }
+  keep(room, `clearing tickets for table ${table.number}`, () => room.repos.tickets.clearFor(room.venue.slug, table.number))
 
   table.history = []
   table.notifications = []
@@ -532,6 +576,7 @@ function endGame(room, game, winner, reason) {
       reason
     }
     room.tickets.set(ticket.id, ticket)
+    keep(room, `saving ticket ${ticket.id}`, () => room.repos.tickets.create(room.venue.slug, ticket))
   }
 
   for (const number of game.players) {
@@ -896,6 +941,7 @@ function onConnection(room, socket) {
       reason: 'gift'
     }
     room.tickets.set(ticket.id, ticket)
+    keep(room, `saving ticket ${ticket.id}`, () => room.repos.tickets.create(room.venue.slug, ticket))
 
     log(from, { kind: 'gift', direction: 'out', otherTable: target.number, item: menuItem })
     log(target, { kind: 'gift', direction: 'in', otherTable: from.number, item: menuItem })
@@ -1063,6 +1109,7 @@ function onConnection(room, socket) {
     if (!ticket || ticket.status === 'delivered') return
     ticket.status = 'delivered'
     ticket.deliveredAt = Date.now()
+    keep(room, `delivering ticket ${ticket.id}`, () => room.repos.tickets.deliver(room.venue.slug, ticket.id, ticket.deliveredAt))
     syncStaff(room)
   })
 

@@ -285,8 +285,9 @@ without streaming any geometry between them. The seed is the only thing that cro
 
 ## Venues
 
-The server hosts many restaurants at once. `data/venues.json` lists them; each entry is
-`{ slug, name, menu?, botTables? }`, with the demo defaults filling anything left out. Tablets
+The server hosts many restaurants at once. The venue store lists them (a Postgres table, or
+`data/venues.json` without a database); each entry is `{ slug, name, menu?, botTables? }`,
+with the demo defaults filling anything left out. Tablets
 load `/v/<slug>`, staff load `/v/<slug>/staff`, and the bare URL redirects to the first venue.
 
 Each venue is a socket.io namespace (`/venue/<slug>`) and a *room*: one `createRoom()` call in
@@ -298,10 +299,39 @@ screen instead of retrying.
 
 ## State
 
-Everything except venue config and floor plans lives in memory, per room. Stopping the process
-wipes every room. Floor plans persist to `data/venues/<slug>/floorplan.json`, validated and
-clamped on load, falling back to the default plan if the file is missing or malformed. Set
-`DATA_DIR` to move the data directory (on Fly, point it at a volume).
+Two kinds. **Tonight's** state — seated tables, challenges, games, chat threads, notifications,
+table history — lives in memory, per room, and stopping the process wipes it. **Durable** state
+— venues, floor plans and tickets — goes through the repository layer in `server/db/` and comes
+back when the server does.
+
+Handlers never touch storage directly. Each room carries `repos`, and:
+
+- On boot the venue list is read from the store (an empty store is the single demo venue).
+- When a venue's room is first created it is *hydrated*: the saved floor plan (validated and
+  clamped like any save) and every open ticket are loaded before the first socket's handlers
+  attach, so the staff board after a restart is the board before it.
+- Every ticket created, delivered or cleared, and every floor plan saved or reset, is written
+  through in the background. The room's in-memory Map stays the source for every broadcast; a
+  failed write is logged with the venue slug and never reaches a socket handler.
+
+Which store is decided once at startup:
+
+| `DATABASE_URL` | Backend | Venues | Floor plans | Tickets |
+| --- | --- | --- | --- | --- |
+| set | Postgres (`pg`) | `venues` | `floorplans` | `tickets` (open ones rehydrate) |
+| unset | files under `DATA_DIR` (default `data/`) | `venues.json` | `venues/<slug>/floorplan.json` | memory, lost on restart |
+
+The Postgres schema is versioned: `server/db/migrate.js` applies each `server/db/migrations/*.sql`
+once, in order, recording it in `schema_migrations`, under an advisory lock so two machines
+rolling at the same time cannot both create the tables. It runs at boot and as `npm run db:migrate`.
+The first migration also creates `devices` (`venue_id`, `token_hash`, `label`, `created_at`,
+`revoked_at`) and `staff_users` (`venue_id`, `email`, `password_hash`, …), unused today, so the
+auth work that follows only has to write handlers. `npm run seed` upserts the venues in
+`docs/venues.example.json` for a first deploy.
+
+The in-memory backend behind the tests has the same interface, so every test runs without a
+database; the Postgres backend's tests run against the same contract when `DATABASE_URL` is set
+and are skipped otherwise.
 
 ## Tunables
 
@@ -309,8 +339,8 @@ clamped on load, falling back to the default plan if the file is missing or malf
 | --- | --- | --- |
 | Challenge expiry | 30s | `server/state.js` |
 | Reconnect grace | 60s | `server/state.js` |
-| Bot tables | 12, 17, 20 | `server/state.js`, per venue in `data/venues.json` |
-| Menu and prices | 8 items | `server/state.js`, per venue in `data/venues.json` |
+| Bot tables | 12, 17, 20 | `server/state.js`, per venue in the venue store |
+| Menu and prices | 8 items | `server/state.js`, per venue in the venue store |
 | Message length / thread / inbox / history | 280 / 200 / 40 / 40 | `server/state.js` |
 | Race count-in and ceiling | 3.2s / 120s | `server/games/race.js` |
 | Beer pong bot wobble | 0.11–0.2 | `server/games/beerpong.js` |
@@ -323,10 +353,12 @@ clamped on load, falling back to the default plan if the file is missing or malf
 This is a demo for pitching bar owners, not a pilot. The following are missing on purpose, not
 by omission:
 
-- **No database.** A bar night is ephemeral; a restart wipes every room. Venues and floor plans
-  are JSON on disk.
+- **No database for the night itself.** A bar night is ephemeral; a restart wipes every live
+  room. Only venues, floor plans and tickets persist (Postgres, or JSON on disk without one) —
+  no game history, no chat archive.
 - **No accounts or auth.** Tables are identified by number. Anyone who reaches a venue's `/staff`
-  URL can run that floor, and anyone who knows a venue's slug can join it.
+  URL can run that floor, and anyone who knows a venue's slug can join it. The `devices` and
+  `staff_users` tables exist for this; nothing reads them yet.
 - **No POS or payments.** "The loser's tab" is a ticket a human acts on, not an integration.
 - **No sound.** Every game is silent.
 - **No stats or leaderboards** for guests, and no analytics for staff beyond the open-ticket

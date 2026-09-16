@@ -1,11 +1,8 @@
-import fs from 'node:fs'
-import path from 'node:path'
-
 // Session state is deliberately in-memory, but the floor plan is *configuration*
 // — an owner drags 24 tables into place once and it must survive a restart.
 export const PLAN_UNITS = { width: 1000, height: 700 }
 
-function defaultPlan() {
+export function defaultPlan() {
   const tables = []
   const push = (number, x, y, shape = 'round', seats = 4) =>
     tables.push({ number, x, y, w: shape === 'round' ? 78 : 104, h: 78, shape, seats })
@@ -34,46 +31,40 @@ function defaultPlan() {
   }
 }
 
-// One store per venue. `file` is where that venue's layout lives; null keeps
-// the plan in memory only, which is what tests want.
-export function createPlanStore(file) {
-  let plan = load()
+// One store per venue, holding the plan the room is using right now. Where it
+// lives between restarts is the repository's business: `persist(plan)` is
+// called after every save and reset, and `load(raw)` takes back whatever the
+// repository kept, validated and clamped exactly like a save.
+export function createPlanStore({ persist = null } = {}) {
+  let plan = defaultPlan()
 
-  function load() {
-    if (!file) return defaultPlan()
-    try {
-      const raw = JSON.parse(fs.readFileSync(file, 'utf8'))
-      if (Array.isArray(raw?.tables)) return raw
-    } catch {
-      // No saved plan yet, or it was hand-edited into something unreadable.
-    }
-    return defaultPlan()
-  }
-
-  function persist() {
-    if (!file) return
-    try {
-      fs.mkdirSync(path.dirname(file), { recursive: true })
-      fs.writeFileSync(file, JSON.stringify(plan, null, 2))
-    } catch (error) {
-      console.warn(`floorplan: could not persist ${file} —`, error.message)
-    }
+  function write() {
+    if (!persist) return
+    Promise.resolve()
+      .then(() => persist(plan))
+      .catch((error) => console.warn('floorplan: could not persist —', error.message))
   }
 
   return {
     get: () => plan,
 
+    load(raw) {
+      const cleaned = cleanPlan(raw)
+      if (cleaned) plan = cleaned
+      return plan
+    },
+
     save(next) {
       const cleaned = cleanPlan(next)
       if (!cleaned) return null
       plan = cleaned
-      persist()
+      write()
       return plan
     },
 
     reset() {
       plan = defaultPlan()
-      persist()
+      write()
       return plan
     }
   }

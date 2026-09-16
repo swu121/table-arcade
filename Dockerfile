@@ -11,6 +11,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server
+COPY scripts/seed.js ./scripts/seed.js
+COPY docs/venues.example.json ./docs/venues.example.json
 COPY --from=build /app/dist ./dist
 EXPOSE 3000
 CMD ["node", "server/index.js"]

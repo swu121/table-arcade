@@ -1,10 +1,8 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import { MENU, BOT_TABLES } from './state.js'
 
 // A venue is one restaurant: everything that makes its room different from the
-// next one. Today it's a row in data/venues.json; the shape is what a database
-// row will look like later, so onboarding is "add a venue", never "deploy".
+// next one. It's a row in Postgres, or an entry in data/venues.json when there
+// is no database — either way, onboarding is "add a venue", never "deploy".
 //
 //   { slug, name, menu?, botTables? }
 //
@@ -14,16 +12,15 @@ export const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/
 
 const DEFAULT_VENUES = [{ slug: 'demo', name: 'Table Arcade' }]
 
-export function loadVenues(dataDir) {
-  const file = path.join(dataDir, 'venues.json')
-  try {
-    const raw = JSON.parse(fs.readFileSync(file, 'utf8'))
-    const venues = normalise(raw)
-    if (venues.length) return venues
-  } catch {
-    // No venues file yet: the single-venue demo.
-  }
-  return normalise(DEFAULT_VENUES)
+// An empty store — no venues.json yet, or a database that hasn't been seeded —
+// is the single-venue demo, not a server with nowhere to land.
+export function venueList(list) {
+  const venues = normalise(list)
+  return venues.length ? venues : normalise(DEFAULT_VENUES)
+}
+
+export async function loadVenues(repos) {
+  return venueList(await repos.venues.list())
 }
 
 export function normalise(list) {
