@@ -1,4 +1,4 @@
-import { test, expect } from './helpers.js'
+import { test, expect, loginForm, signInStaff } from './helpers.js'
 
 test.describe('venue routes', () => {
   test('the bare URL lands on the default venue', async ({ page }) => {
@@ -11,7 +11,9 @@ test.describe('venue routes', () => {
   test('the bare staff URL lands on the default venue staff screen', async ({ page }) => {
     await page.goto('/staff')
     await expect(page).toHaveURL(/\/v\/demo\/staff$/)
-    await expect(page.getByRole('heading', { name: 'Open tickets' })).toBeVisible()
+    // The staff screen is behind a login; the board is there once signed in.
+    await expect(loginForm(page)).toBeVisible()
+    await signInStaff(page)
   })
 
   test('an unknown venue slug shows the no-venue screen', async ({ page }) => {

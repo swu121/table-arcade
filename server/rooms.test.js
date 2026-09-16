@@ -22,7 +22,7 @@ async function boot(repos = createMemoryRepos()) {
   const port = httpServer.address().port
   return {
     app,
-    client: (slug) => connect(`http://localhost:${port}/venue/${slug}`, { transports: ['websocket'] }),
+    client: (slug, auth = {}) => connect(`http://localhost:${port}/venue/${slug}`, { transports: ['websocket'], auth }),
     close: async (...clients) => {
       for (const client of clients) client.close()
       app.stop()
@@ -54,6 +54,14 @@ function tablet(server, slug) {
   const socket = server.client(slug)
   socket.syncs = inbox(socket, 'state:sync')
   socket.errors = inbox(socket, 'app:error')
+  return socket
+}
+
+// A staff screen, in through the dev door: no staff users exist in these
+// rooms, and the tests do not run in production (see staff.test.js for the
+// real login).
+function staffScreen(server, slug) {
+  const socket = server.client(slug, { staff: 'dev' })
   socket.staff = inbox(socket, 'staff:sync')
   return socket
 }
@@ -102,8 +110,8 @@ test('tickets and staff sync stay inside their venue', async (t) => {
   const server = await boot()
   const north = tablet(server, 'north')
   const south = tablet(server, 'south')
-  const northStaff = tablet(server, 'north')
-  const southStaff = tablet(server, 'south')
+  const northStaff = staffScreen(server, 'north')
+  const southStaff = staffScreen(server, 'south')
   t.after(() => server.close(north, south, northStaff, southStaff))
   await seat(north, 4)
   await seat(south, 4)
@@ -158,7 +166,7 @@ test('a room is created with the floor plan and open tickets the store kept', as
 
   const server = await boot(repos)
   const guest = tablet(server, 'north')
-  const staff = tablet(server, 'north')
+  const staff = staffScreen(server, 'north')
   t.after(() => server.close(guest, staff))
 
   // The very first tablet in already sees the saved room, not the default.
@@ -181,7 +189,7 @@ test('tickets and plan edits made tonight are still there after a restart', asyn
   // Night one: a gift, and staff lay out the patio.
   const first = await boot(repos)
   const guest = tablet(first, 'north')
-  const staff = tablet(first, 'north')
+  const staff = staffScreen(first, 'north')
   await seat(guest, 4)
   if (!staff.connected) await once(staff, 'connect')
   staff.emit('staff:join')
@@ -195,7 +203,7 @@ test('tickets and plan edits made tonight are still there after a restart', asyn
 
   // Deploy. A new server over the same store has the ticket and the plan.
   const second = await boot(repos)
-  const staff2 = tablet(second, 'north')
+  const staff2 = staffScreen(second, 'north')
   if (!staff2.connected) await once(staff2, 'connect')
   staff2.emit('staff:join')
   const board = await staff2.staff.next()
@@ -210,7 +218,7 @@ test('tickets and plan edits made tonight are still there after a restart', asyn
   // And delivering it was remembered too: the third boot has nothing open.
   assert.deepEqual(await repos.tickets.openFor('north'), [])
   const third = await boot(repos)
-  const staff3 = tablet(third, 'north')
+  const staff3 = staffScreen(third, 'north')
   t.after(() => third.close(staff3))
   if (!staff3.connected) await once(staff3, 'connect')
   staff3.emit('staff:join')
@@ -222,7 +230,7 @@ test('clearing a table drops its tickets from the store as well as the board', a
   await repos.tickets.create('north', stored('tk_a', 4, 12))
   await repos.tickets.create('north', stored('tk_b', 7, 12))
   const server = await boot(repos)
-  const staff = tablet(server, 'north')
+  const staff = staffScreen(server, 'north')
   t.after(() => server.close(staff))
   if (!staff.connected) await once(staff, 'connect')
   staff.emit('staff:join')

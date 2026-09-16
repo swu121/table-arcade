@@ -9,6 +9,9 @@ export { createFileRepos, createMemoryRepos }
 //   repos.venues.list() / upsert(venue)
 //   repos.floorplans.get(slug) / save(slug, plan)
 //   repos.tickets.create(slug, ticket) / deliver(slug, id) / openFor(slug) / clearFor(slug, table)
+//   repos.devices.issue({ venue, label }) / find(tokenHash) / list(venue) / revoke(id) / touch(id)
+//   repos.staff.create({ venue, email, password, name }) / findByEmail(venue, email) / list(venue)
+//               / revoke(id) / verify(venue, email, password)
 //   repos.close()
 //
 // Chosen once at startup: DATABASE_URL means Postgres, a data directory means

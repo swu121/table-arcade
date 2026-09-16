@@ -1,7 +1,29 @@
 import { test as base, expect } from '@playwright/test'
-import { contextOptions } from './env.js'
+import { STAFF, contextOptions } from './env.js'
 
 export { expect }
+
+/* --------------------------------------------------------------- staff --- */
+
+export const loginForm = (page) => page.getByText('Staff sign in', { exact: false })
+export const ticketBoard = (page) => page.getByRole('heading', { name: 'Open tickets' })
+
+// Signs the page in as the seeded staff user and waits for the ticket board.
+export async function signInStaff(page, { email, password } = STAFF) {
+  await expect(loginForm(page)).toBeVisible()
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password').fill(password)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(ticketBoard(page)).toBeVisible()
+}
+
+// A staff screen for the venue, signed in. The context's localStorage starts
+// empty, so every staff page begins at the login form.
+export async function staffPage(page, slug) {
+  await page.goto(`/v/${slug}/staff`)
+  await signInStaff(page)
+  return page
+}
 
 // How long the table number has to be held before the keypad appears
 // (src/lib/hold.js), plus some slack.
@@ -20,17 +42,13 @@ export const test = base.extend({
       const context = await browser.newContext(contextOptions)
       contexts.push(context)
       const page = await context.newPage()
-      await page.goto(path)
+      if (path) await page.goto(path)
       return page
     }
 
     await use({
       tablet: (slug) => open(`/v/${slug}`),
-      staff: async (slug) => {
-        const page = await open(`/v/${slug}/staff`)
-        await expect(page.getByRole('heading', { name: 'Open tickets' })).toBeVisible()
-        return page
-      }
+      staff: async (slug) => staffPage(await open(null), slug)
     })
 
     await Promise.all(contexts.map((context) => context.close()))

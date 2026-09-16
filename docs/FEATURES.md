@@ -15,7 +15,7 @@ This document covers what is actually built, from both sides of the room. Screen
 
 Before any of this, a tablet in a production venue has to be **paired**: opened at the venue's
 address, it shows a six-box code entry and nothing else until staff read a pairing code off
-their screen and type it in (see [Devices](#devices)). That happens once per tablet.
+their screen and type it in (see [Devices & staff](#devices--staff)). That happens once per tablet.
 
 A tablet with no table assigned shows a dead `00` and tells the guest to ask a server. Table
 numbers belong to staff, so the way into the assignment keypad is a deliberate **1.2 second
@@ -219,8 +219,22 @@ games, reply to messages in character, and say thanks for a round.
 
 # Part 2 — The staff side
 
-The staff screen lives at `/staff` and has three tabs: tickets, the floor plan editor, and the
-venue's paired tablets.
+The staff screen lives at `/staff`, behind a login, and has three tabs: tickets, the floor
+plan editor, and the venue's paired tablets and staff accounts.
+
+## Signing in
+
+The first thing the staff screen shows is an email and password form. Accounts belong to one
+venue — the same person at two restaurants has two — and are made with
+`npm run staff:add -- <slug> <email> <name>` for the first one and from the staff screen after
+that. A wrong password, an unknown email and a revoked account all get the same answer, and
+the form is limited to ten tries a minute. Signing in lasts fourteen days on that browser,
+extended every time it is used; **Sign out**, next to the tab strip, ends it now. Being revoked
+by another member of staff drops the screen back to the form mid-shift, with a line saying why.
+
+On the dev server only, a venue with no accounts yet shows **Continue (dev)** under the form,
+so `npm run dev` still reaches the staff screen in one click. Adding the first account closes
+it. See [Staff login](#staff-login).
 
 ## Tickets
 
@@ -269,16 +283,22 @@ reloads at its next idle moment, and busy ones wait. The staff screen that press
 If a tablet crashed on its own, the activity says so — `Tablet app crashed · <message>` — so the
 one staff are being asked about carries its own evidence.
 
-## Devices
+## Devices & staff
 
 A new tablet cannot join a venue that requires pairing until staff let it in. **Pair a tablet**
-— in the floor plan editor's header, and on the Devices tab — asks the server for a six-digit
-code and shows it large with a countdown: it works once and lasts five minutes. On the tablet,
-the pairing screen (six boxes and the same keypad as table setup) takes the code and the tablet
-is in; it never has to be typed again. The **Devices** tab lists every paired tablet with its
-label, whether it is online, when it was paired and last seen, and a **Revoke** button behind a
-confirmation. Revoking drops the tablet's connection on the spot and sends it back to the
-pairing screen. See [Pairing](#pairing) for how it is enforced.
+— in the floor plan editor's header, and on the Devices & staff tab — asks the server for a
+six-digit code and shows it large with a countdown: it works once and lasts five minutes. On
+the tablet, the pairing screen (six boxes and the same keypad as table setup) takes the code
+and the tablet is in; it never has to be typed again. The tab lists every paired tablet with
+its label, whether it is online, when it was paired and last seen, and a **Revoke** button
+behind a confirmation. Revoking drops the tablet's connection on the spot and sends it back to
+the pairing screen. See [Pairing](#pairing) for how it is enforced.
+
+Below the tablets is **Staff**: every account that can sign in to this venue, with name, email
+and when it last signed in, and a **Revoke** behind a confirmation that ends their sessions and
+drops their screens at once. The last account cannot be revoked — that would lock the venue.
+**Add staff** takes a name, an email and a password of at least eight characters; the email has
+to be new to this venue.
 
 ---
 
@@ -352,10 +372,37 @@ Enforcement is per venue: `requirePairing` in the venue row, defaulting to on in
 off otherwise, so `npm run dev` and the tests pair nothing. The tests that cover the enforced
 path (`server/pairing.test.js`) turn it on for their venue explicitly.
 
-**Temporary:** a handshake carrying `auth: { staff: true }` is admitted without a token. That
-is what the staff screen sends, and it means the staff URL is still open to anyone who has it.
-Staff login is the next piece of work and replaces this hook (`authenticate` in
-`server/pairing.js`).
+## Staff login
+
+The staff screen can deliver tickets, clear tables, restart tablets, pair and revoke devices,
+so its URL alone must not be enough either. Each venue has **staff users** (`staff_users`:
+`venue_id`, `email`, `password_hash`, `name`, `created_at`, `revoked_at`, `last_login_at`; or
+`data/venues/<slug>/staff.json` without a database). Passwords are hashed with Node's own
+`crypto.scrypt` (N=16384, r=8, p=1, a 16-byte salt, stored as `scrypt:N:r:p:salt:hash`) and
+compared in constant time; an unknown email is checked against a throwaway hash so the timing
+says nothing. Emails are unique per venue, case-insensitively.
+
+`POST /api/venue/:slug/staff/login` with `{ email, password }` answers `{ token, name,
+expiresAt }` — a 32-byte base64url **session token** — or `401 BAD_LOGIN` for a wrong password,
+an unknown email or a revoked account alike, and `429 TOO_MANY` past ten tries a minute per IP
+or per venue (the same limiter as pairing, `server/ratelimit.js`). Sessions live in memory,
+per room, keyed by the token's SHA-256, for fourteen days from their last use; a restart signs
+everyone out. `POST …/staff/logout` ends one. The client keeps the session in `localStorage`,
+per venue, and sends it in the handshake: `auth: { staff: <token>, version }`.
+
+The per-namespace middleware in `roomFor` routes on that: a handshake carrying `auth.staff` is a
+staff screen and is admitted only on a live session, with `socket.data.staff = { id, name,
+email }`; anything else is a tablet and goes through pairing. A staff screen never holds a
+device and a tablet never becomes staff. Every `staff:*` handler, `staff:join` included,
+refuses a socket without `socket.data.staff` with `app:error FORBIDDEN`. Revoking a user
+(`staff:revokeUser`) ends their sessions and disconnects their sockets with
+`staff:signedOut { reason: 'revoked' }`; the client clears the session and shows the form.
+
+**The dev door.** Outside production (`NODE_ENV !== 'production'`), a venue with no active
+staff users admits a handshake with `auth.staff === 'dev'` as `{ id: 'dev', name: 'Developer'
+}`, and `GET …/staff/status` says so (`{ dev: true }`) so the login screen can offer
+**Continue (dev)**. It shuts the moment the venue has a user and never opens in production;
+the server tests use it, and `server/staff.test.js` covers both edges.
 
 ## Builds, restarts and crashes
 
@@ -401,18 +448,19 @@ Handlers never touch storage directly. Each room carries `repos`, and:
 
 Which store is decided once at startup:
 
-| `DATABASE_URL` | Backend | Venues | Floor plans | Tickets |
-| --- | --- | --- | --- | --- |
-| set | Postgres (`pg`) | `venues` | `floorplans` | `tickets` (open ones rehydrate) |
-| unset | files under `DATA_DIR` (default `data/`) | `venues.json` | `venues/<slug>/floorplan.json` | memory, lost on restart |
+| `DATABASE_URL` | Backend | Venues | Floor plans | Tickets | Devices, staff |
+| --- | --- | --- | --- | --- | --- |
+| set | Postgres (`pg`) | `venues` | `floorplans` | `tickets` (open ones rehydrate) | `devices`, `staff_users` |
+| unset | files under `DATA_DIR` (default `data/`) | `venues.json` | `venues/<slug>/floorplan.json` | memory, lost on restart | `venues/<slug>/{devices,staff}.json` |
 
 The Postgres schema is versioned: `server/db/migrate.js` applies each `server/db/migrations/*.sql`
 once, in order, recording it in `schema_migrations`, under an advisory lock so two machines
 rolling at the same time cannot both create the tables. It runs at boot and as `npm run db:migrate`.
 The first migration also creates `devices` (paired tablets, see [Pairing](#pairing)) and
-`staff_users` (`venue_id`, `email`, `password_hash`, …), the latter unused until staff login
-lands; the second adds `devices.last_seen_at` and `venues.require_pairing`. `npm run seed` upserts the venues in
-`docs/venues.example.json` for a first deploy.
+`staff_users` (see [Staff login](#staff-login)); the second adds `devices.last_seen_at` and
+`venues.require_pairing`; the third adds `staff_users.name` and `last_login_at`. `npm run seed`
+upserts the venues in `docs/venues.example.json` for a first deploy, and `npm run staff:add`
+makes a venue's first staff account.
 
 The in-memory backend behind the tests has the same interface, so every test runs without a
 database; the Postgres backend's tests run against the same contract when `DATABASE_URL` is set
@@ -429,6 +477,7 @@ and are skipped otherwise.
 | Message length / thread / inbox / history | 280 / 200 / 40 / 40 | `server/state.js` |
 | Reload loop guard | 3 reloads per 60s | `src/lib/reload.js` |
 | Pairing code life / guesses / last-seen writes | 5 min, once / 10 per min per IP and room / once per min | `server/pairing.js` |
+| Staff session life / login tries / password length | 14 days, sliding / 10 per min per IP and venue / 8+ | `server/staff.js`, `server/db/staff.js` |
 | Crash report rate | 5 per 60s per tablet | `src/lib/crash.js` |
 | Race count-in and ceiling | 3.2s / 120s | `server/games/race.js` |
 | Beer pong bot wobble | 0.11–0.2 | `server/games/beerpong.js` |
@@ -442,12 +491,13 @@ This is a demo for pitching bar owners, not a pilot. The following are missing o
 by omission:
 
 - **No database for the night itself.** A bar night is ephemeral; a restart wipes every live
-  room. Only venues, floor plans and tickets persist (Postgres, or JSON on disk without one) —
-  no game history, no chat archive.
-- **No staff login yet.** Tables are identified by number and tablets by a device token staff
-  issue when pairing, so a venue's slug alone no longer gets a tablet in. But anyone who reaches
-  a venue's `/staff` URL can still run that floor — and, for now, pair tablets. The
-  `staff_users` table exists for the login that closes this; nothing reads it yet.
+  room. Only venues, floor plans, tickets, paired devices and staff accounts persist (Postgres,
+  or JSON on disk without one) — no game history, no chat archive.
+- **No accounts for guests.** Tables are identified by number and tablets by a device token
+  staff issue when pairing; staff sign in with a per-venue email and password. There are no
+  roles beyond "staff" — everyone who can sign in can do everything, including add and revoke
+  other staff — and no password reset: a forgotten password is a revoke and a new account.
+  Staff sessions live in memory, so a deploy signs everyone out.
 - **No POS or payments.** "The loser's tab" is a ticket a human acts on, not an integration.
 - **No sound.** Every game is silent.
 - **No stats or leaderboards** for guests, and no analytics for staff beyond the open-ticket

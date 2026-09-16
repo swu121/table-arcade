@@ -16,6 +16,7 @@ import { createPlanStore } from './floorplan.js'
 import { createVenueRegistry, venueList } from './venues.js'
 import { createMemoryRepos } from './db/index.js'
 import { authenticate, broadcastDevices, createPairingStore, deviceList, kickDevice } from './pairing.js'
+import { authenticateStaff, broadcastStaff, createStaffSessions, kickStaffUser, staffList } from './staff.js'
 
 const BOT_ACCEPT_DELAY = 1500
 
@@ -48,6 +49,8 @@ export function init(io, { repos = createMemoryRepos(), venues: list = null, ver
     room.ready = hydrate(room)
     // Live pairing codes for this venue, and nothing else: tokens go to repos.
     room.pairing = createPairingStore()
+    // Live staff sessions, likewise: users go to repos, sessions stay here.
+    room.staffSessions = createStaffSessions()
     rooms.set(slug, room)
     // Handlers go on the venue's own namespace, not the dynamic parent: a
     // namespace made here before its first socket (a crash report, a startup
@@ -55,12 +58,14 @@ export function init(io, { repos = createMemoryRepos(), venues: list = null, ver
     //
     // Nobody's handlers attach until the room has its plan and open tickets
     // back, so the first tablet in after a restart sees the same board as the
-    // last one out. Then the handshake is checked: a venue that requires
-    // pairing admits only a socket holding one of its device tokens (see
-    // pairing.js, including the temporary staff exemption).
+    // last one out. Then the handshake is checked. A handshake carrying
+    // `auth.staff` is a staff screen and needs a live staff session
+    // (staff.js); anything else is a tablet, and a venue that requires
+    // pairing admits only one holding a device token (pairing.js).
     nsp.use((socket, next) => {
+      const gate = socket.handshake.auth?.staff != null ? authenticateStaff : authenticate
       room.ready
-        .then(() => authenticate(room, socket))
+        .then(() => gate(room, socket))
         .then(() => next(), (error) => next(error))
     })
     nsp.on('connection', (socket) => {
@@ -1142,82 +1147,156 @@ function onConnection(room, socket) {
     syncAll(room)
   })
 
-  socket.on('staff:join', () => {
-    socket.join('staff')
-    socket.emit('staff:sync', staffPayload(room))
-    deviceList(room)
-      .then((devices) => socket.emit('staff:devices', { devices }))
-      .catch((error) => console.warn(`pairing: could not list devices for ${room.venue.slug} —`, error.message))
-  })
+  // Every staff:* event needs a socket that came in through the staff
+  // handshake. A tablet — or anything else — sending one is told and ignored.
+  const staffOnly = (handler) => (payload) => {
+    if (!socket.data.staff) return fail(socket, 'FORBIDDEN', 'Staff only.')
+    return handler(payload ?? {})
+  }
+
+  socket.on(
+    'staff:join',
+    staffOnly(() => {
+      socket.join('staff')
+      socket.emit('staff:sync', staffPayload(room))
+      deviceList(room)
+        .then((devices) => socket.emit('staff:devices', { devices }))
+        .catch((error) => console.warn(`pairing: could not list devices for ${room.venue.slug} —`, error.message))
+      staffList(room)
+        .then((users) => socket.emit('staff:users', { users, me: socket.data.staff }))
+        .catch((error) => console.warn(`staff: could not list users for ${room.venue.slug} —`, error.message))
+    })
+  )
 
   // Pairing. Staff ask for a code and read it off their screen into the
   // tablet; the tablet trades it for a token over HTTP (see pairing.js).
-  socket.on('staff:pairCode', () => {
-    socket.emit('staff:pairCode', room.pairing.create())
-  })
+  socket.on(
+    'staff:pairCode',
+    staffOnly(() => {
+      socket.emit('staff:pairCode', room.pairing.create())
+    })
+  )
 
   // Revoking a device drops any socket holding it on the spot. The id has to
   // be one of this venue's, so a staff screen cannot reach into another room.
-  socket.on('staff:revokeDevice', async ({ id } = {}) => {
-    const deviceId = String(id ?? '')
-    try {
-      const devices = await room.repos.devices.list(room.venue.slug)
-      if (!devices.some((d) => d.id === deviceId)) return fail(socket, 'NO_DEVICE', 'That tablet is not paired here.')
-      await room.repos.devices.revoke(deviceId)
-    } catch (error) {
-      console.warn(`pairing: revoke failed for ${room.venue.slug} —`, error.message)
-      return fail(socket, 'REVOKE_FAILED', 'That tablet could not be revoked. Try again.')
-    }
-    kickDevice(room, deviceId)
-    broadcastDevices(room)
-  })
+  socket.on(
+    'staff:revokeDevice',
+    staffOnly(async ({ id }) => {
+      const deviceId = String(id ?? '')
+      try {
+        const devices = await room.repos.devices.list(room.venue.slug)
+        if (!devices.some((d) => d.id === deviceId)) return fail(socket, 'NO_DEVICE', 'That tablet is not paired here.')
+        await room.repos.devices.revoke(deviceId)
+      } catch (error) {
+        console.warn(`pairing: revoke failed for ${room.venue.slug} —`, error.message)
+        return fail(socket, 'REVOKE_FAILED', 'That tablet could not be revoked. Try again.')
+      }
+      kickDevice(room, deviceId)
+      broadcastDevices(room)
+    })
+  )
 
-  socket.on('staff:deliver', ({ ticketId } = {}) => {
-    const ticket = room.tickets.get(ticketId)
-    if (!ticket || ticket.status === 'delivered') return
-    ticket.status = 'delivered'
-    ticket.deliveredAt = Date.now()
-    keep(room, `delivering ticket ${ticket.id}`, () => room.repos.tickets.deliver(room.venue.slug, ticket.id, ticket.deliveredAt))
-    syncStaff(room)
-  })
+  // Staff accounts. Adding one from the screen is how a venue grows past the
+  // first user `npm run staff:add` made (or, in dev, past the dev door).
+  socket.on(
+    'staff:addUser',
+    staffOnly(async ({ name, email, password }) => {
+      try {
+        await room.repos.staff.create({ venue: room.venue.slug, name, email, password })
+      } catch (error) {
+        if (error.code) return fail(socket, error.code, error.message)
+        console.warn(`staff: could not add a user for ${room.venue.slug} —`, error.message)
+        return fail(socket, 'ADD_FAILED', 'That account could not be saved. Try again.')
+      }
+      broadcastStaff(room)
+    })
+  )
 
-  socket.on('staff:clearTable', ({ number } = {}) => {
-    const table = room.tables.get(Number(number))
-    if (!table) return
-    wipeTable(room, table)
-    syncAll(room)
-  })
+  // Revoking a user ends their sessions and drops their screens. The last
+  // active user cannot be revoked: in production that would lock the venue.
+  socket.on(
+    'staff:revokeUser',
+    staffOnly(async ({ id }) => {
+      const userId = String(id ?? '')
+      try {
+        const users = await room.repos.staff.list(room.venue.slug)
+        if (!users.some((u) => u.id === userId)) return fail(socket, 'NO_USER', 'That account is not on this venue.')
+        if (users.length === 1) return fail(socket, 'LAST_STAFF', 'That is the last account here. Add another first.')
+        await room.repos.staff.revoke(userId)
+      } catch (error) {
+        console.warn(`staff: revoke failed for ${room.venue.slug} —`, error.message)
+        return fail(socket, 'REVOKE_FAILED', 'That account could not be revoked. Try again.')
+      }
+      room.staffSessions.revokeUser(userId)
+      kickStaffUser(room, userId)
+      broadcastStaff(room)
+    })
+  )
+
+  socket.on(
+    'staff:deliver',
+    staffOnly(({ ticketId }) => {
+      const ticket = room.tickets.get(ticketId)
+      if (!ticket || ticket.status === 'delivered') return
+      ticket.status = 'delivered'
+      ticket.deliveredAt = Date.now()
+      keep(room, `delivering ticket ${ticket.id}`, () => room.repos.tickets.deliver(room.venue.slug, ticket.id, ticket.deliveredAt))
+      syncStaff(room)
+    })
+  )
+
+  socket.on(
+    'staff:clearTable',
+    staffOnly(({ number }) => {
+      const table = room.tables.get(Number(number))
+      if (!table) return
+      wipeTable(room, table)
+      syncAll(room)
+    })
+  )
 
   // Staff-side restarts for tablets. One tablet is a person standing at it
   // saying it's stuck, so it goes now. All of them is a push after a deploy or
   // a bad night, and each tablet picks its own quiet moment.
-  socket.on('staff:reloadTable', ({ number } = {}) => {
-    const table = room.tables.get(Number(number))
-    const target = socketFor(room, table)
-    if (!target) return
-    log(table, { kind: 'reload' })
-    target.emit('app:reload', { reason: 'staff', urgent: true })
-    syncStaff(room)
-  })
+  socket.on(
+    'staff:reloadTable',
+    staffOnly(({ number }) => {
+      const table = room.tables.get(Number(number))
+      const target = socketFor(room, table)
+      if (!target) return
+      log(table, { kind: 'reload' })
+      target.emit('app:reload', { reason: 'staff', urgent: true })
+      syncStaff(room)
+    })
+  )
 
-  socket.on('staff:reloadAll', () => {
-    for (const other of room.nsp.sockets.values()) {
-      if (other.rooms.has('staff')) continue
-      other.emit('app:reload', { reason: 'staff', urgent: false })
-    }
-  })
+  socket.on(
+    'staff:reloadAll',
+    staffOnly(() => {
+      for (const other of room.nsp.sockets.values()) {
+        if (other.data.staff) continue
+        other.emit('app:reload', { reason: 'staff', urgent: false })
+      }
+    })
+  )
 
-  socket.on('staff:savePlan', ({ plan } = {}) => {
-    if (!room.plans.save(plan)) return fail(socket, 'BAD_PLAN', 'That layout could not be saved.')
-    syncStaff(room)
-    syncAll(room)
-  })
+  socket.on(
+    'staff:savePlan',
+    staffOnly(({ plan }) => {
+      if (!room.plans.save(plan)) return fail(socket, 'BAD_PLAN', 'That layout could not be saved.')
+      syncStaff(room)
+      syncAll(room)
+    })
+  )
 
-  socket.on('staff:resetPlan', () => {
-    room.plans.reset()
-    syncStaff(room)
-    syncAll(room)
-  })
+  socket.on(
+    'staff:resetPlan',
+    staffOnly(() => {
+      room.plans.reset()
+      syncStaff(room)
+      syncAll(room)
+    })
+  )
 
   socket.on('disconnect', () => {
     if (socket.data.deviceId) broadcastDevices(room)

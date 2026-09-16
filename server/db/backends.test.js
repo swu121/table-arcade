@@ -134,6 +134,59 @@ function contract(name, open, { skip = false } = {}) {
     assert.deepEqual(await repos.devices.list(north), [])
     assert.deepEqual((await repos.devices.list(south)).map((d) => d.id), [other.id])
   })
+
+  test(`${name}: staff users are created, verified, listed per venue and revoked`, { skip }, async (t) => {
+    const repos = await open(t)
+    const north = stamp()
+    const south = stamp()
+    await repos.venues.upsert(venue(north))
+    await repos.venues.upsert(venue(south))
+
+    const sam = await repos.staff.create({ venue: north, email: '  Sam@Example.com ', password: 'correct horse', name: ' Sam ' })
+    assert.equal(sam.venue, north)
+    assert.equal(sam.email, 'sam@example.com', 'emails are trimmed and lower-cased')
+    assert.equal(sam.name, 'Sam')
+    assert.equal(sam.revokedAt, null)
+    assert.equal(sam.lastLoginAt, null)
+    assert.equal('passwordHash' in sam, false)
+    assert.equal('password' in sam, false)
+
+    // Unique per venue, case-insensitively; the same email is fine next door.
+    await assert.rejects(
+      repos.staff.create({ venue: north, email: 'SAM@example.com', password: 'another one', name: 'Sam 2' }),
+      (error) => error.code === 'EMAIL_TAKEN'
+    )
+    await assert.rejects(
+      repos.staff.create({ venue: north, email: 'nope', password: 'correct horse', name: 'X' }),
+      (error) => error.code === 'BAD_EMAIL'
+    )
+    await assert.rejects(
+      repos.staff.create({ venue: north, email: 'x@example.com', password: 'short', name: 'X' }),
+      (error) => error.code === 'WEAK_PASSWORD'
+    )
+    const twin = await repos.staff.create({ venue: south, email: 'sam@example.com', password: 'correct horse', name: 'Other Sam' })
+    assert.notEqual(twin.id, sam.id)
+
+    assert.equal((await repos.staff.findByEmail(north, 'SAM@EXAMPLE.COM')).id, sam.id)
+    assert.equal(await repos.staff.findByEmail(north, 'nobody@example.com'), null)
+    assert.deepEqual((await repos.staff.list(north)).map((u) => u.id), [sam.id])
+    assert.deepEqual((await repos.staff.list(south)).map((u) => u.id), [twin.id])
+
+    assert.equal(await repos.staff.verify(north, 'sam@example.com', 'wrong'), null)
+    assert.equal(await repos.staff.verify(south, 'nobody@example.com', 'correct horse'), null)
+    const verified = await repos.staff.verify(north, 'Sam@example.com', 'correct horse')
+    assert.equal(verified.id, sam.id)
+    assert.ok(verified.lastLoginAt > 0, 'a login is stamped')
+    assert.ok((await repos.staff.findByEmail(north, 'sam@example.com')).lastLoginAt > 0)
+
+    assert.equal(await repos.staff.revoke(sam.id), true)
+    assert.equal(await repos.staff.revoke(sam.id), false)
+    assert.equal(await repos.staff.revoke('s_missing'), false)
+    assert.equal(await repos.staff.verify(north, 'sam@example.com', 'correct horse'), null, 'revoked users cannot sign in')
+    assert.ok((await repos.staff.findByEmail(north, 'sam@example.com')).revokedAt > 0)
+    assert.deepEqual(await repos.staff.list(north), [])
+    assert.deepEqual((await repos.staff.list(south)).map((u) => u.id), [twin.id])
+  })
 }
 
 contract('memory', async (t) => {
@@ -187,6 +240,22 @@ test('file: devices live in venues/<slug>/devices.json, hashed, and outlive the 
   const second = createFileRepos(dir)
   assert.equal((await second.devices.find(hashToken(issued.token))).id, issued.id)
   assert.deepEqual((await second.devices.list('north')).map((d) => d.label), ['Patio'])
+})
+
+test('file: staff live in venues/<slug>/staff.json, hashed, and outlive the process', async (t) => {
+  const dir = tempDir(t)
+  const first = createFileRepos(dir)
+  await first.staff.create({ venue: 'north', email: 'sam@example.com', password: 'correct horse', name: 'Sam' })
+
+  const file = path.join(dir, 'venues', 'north', 'staff.json')
+  assert.ok(fs.existsSync(file))
+  const onDisk = fs.readFileSync(file, 'utf8')
+  assert.ok(!onDisk.includes('correct horse'), 'the password is never written')
+  assert.ok(onDisk.includes('"passwordHash": "scrypt:'))
+
+  const second = createFileRepos(dir)
+  assert.deepEqual((await second.staff.list('north')).map((u) => u.name), ['Sam'])
+  assert.equal((await second.staff.verify('north', 'sam@example.com', 'correct horse')).name, 'Sam')
 })
 
 test('file: a hand-edited venues.json still normalises', async (t) => {
