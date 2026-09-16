@@ -3,8 +3,11 @@ import { socket, TABLE_KEY } from './socket.js'
 import { route, redirectToDefault } from './venue.js'
 import { useWakeLock } from './useWakeLock.js'
 import { useReloadPolicy } from './lib/reload.js'
+import { clearDeviceToken } from './lib/device.js'
 import { Backdrop, OfflineBanner, Toast } from './components/Bits.jsx'
 import { Mark, Wordmark } from './components/Logo.jsx'
+import { Pairing } from './screens/Pairing.jsx'
+import { Devices } from './screens/Devices.jsx'
 import { Setup } from './screens/Setup.jsx'
 import { Launch } from './screens/Launch.jsx'
 import { Home } from './screens/Home.jsx'
@@ -59,20 +62,41 @@ function NoVenue({ slug }) {
   )
 }
 
-// The server refuses the namespace outright when the slug isn't a venue, which
-// surfaces as a connect error rather than a message — and it would retry forever.
-function useVenueGate() {
+// Two refusals come back as connect errors rather than messages, and neither
+// is worth retrying: the slug isn't a venue, or the venue wants a device token
+// this tablet doesn't hold. Both disconnect and show a screen; pairing is the
+// only way back from the second, and being revoked mid-night leads there too.
+function useGate() {
   const [missing, setMissing] = useState(false)
+  const [unpaired, setUnpaired] = useState(false)
   useEffect(() => {
     const onError = (error) => {
-      if (error?.message !== 'Invalid namespace') return
+      if (error?.message === 'Invalid namespace') {
+        socket.disconnect()
+        setMissing(true)
+      } else if (error?.message === 'Unauthorized') {
+        socket.disconnect()
+        clearDeviceToken()
+        setUnpaired(true)
+      }
+    }
+    const onRevoked = () => {
       socket.disconnect()
-      setMissing(true)
+      clearDeviceToken()
+      setUnpaired(true)
     }
     socket.on('connect_error', onError)
-    return () => socket.off('connect_error', onError)
+    socket.on('device:revoked', onRevoked)
+    return () => {
+      socket.off('connect_error', onError)
+      socket.off('device:revoked', onRevoked)
+    }
   }, [])
-  return missing
+  const paired = useCallback(() => {
+    setUnpaired(false)
+    socket.connect()
+  }, [])
+  return { missing, unpaired, paired }
 }
 
 function useToast() {
@@ -409,7 +433,8 @@ function StaffNav({ view, onChange }) {
     <div className="panel flex gap-1 p-1">
       {[
         ['tickets', 'Tickets'],
-        ['floorplan', 'Floor plan']
+        ['floorplan', 'Floor plan'],
+        ['devices', 'Devices']
       ].map(([id, label]) => (
         <button
           key={id}
@@ -430,6 +455,7 @@ function StaffApp() {
   const [tickets, setTickets] = useState([])
   const [floorplan, setFloorplan] = useState(null)
   const [floor, setFloor] = useState([])
+  const [devices, setDevices] = useState([])
   const [view, setView] = useState('tickets')
 
   useReloadPolicy(false)
@@ -441,14 +467,17 @@ function StaffApp() {
       setFloorplan(payload.floorplan)
       setFloor(payload.floor ?? [])
     }
+    const onDevices = (payload) => setDevices(payload.devices ?? [])
 
     socket.on('connect', join)
     socket.on('staff:sync', onSync)
+    socket.on('staff:devices', onDevices)
     if (socket.connected) join()
 
     return () => {
       socket.off('connect', join)
       socket.off('staff:sync', onSync)
+      socket.off('staff:devices', onDevices)
     }
   }, [])
 
@@ -458,6 +487,8 @@ function StaffApp() {
     <Shell>
       {view === 'tickets' ? (
         <Staff tickets={tickets} nav={nav} onDeliver={(ticketId) => socket.emit('staff:deliver', { ticketId })} />
+      ) : view === 'devices' ? (
+        <Devices devices={devices} nav={nav} onRevoke={(id) => socket.emit('staff:revokeDevice', { id })} />
       ) : (
         <div className="relative z-10 flex h-full flex-col">
           <header className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
@@ -480,7 +511,7 @@ function StaffApp() {
 }
 
 export default function App() {
-  const missing = useVenueGate()
+  const { missing, unpaired, paired } = useGate()
 
   useEffect(() => {
     if (!route.slug) redirectToDefault(route.staff).catch(console.error)
@@ -497,6 +528,13 @@ export default function App() {
     return (
       <Shell>
         <NoVenue slug={route.slug} />
+      </Shell>
+    )
+  }
+  if (unpaired) {
+    return (
+      <Shell>
+        <Pairing onPaired={paired} />
       </Shell>
     )
   }

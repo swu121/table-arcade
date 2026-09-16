@@ -13,10 +13,11 @@ export const DATA_DIR = path.join(os.tmpdir(), 'table-arcade-e2e')
 
 // Two venues, so cross-venue isolation can be tested. `demo` keeps the default
 // menu and bot tables; `annex` has no bots, so its floor is empty until a
-// tablet sits down.
+// tablet sits down. Pairing is off: the server runs in production mode here,
+// where it is on by default, and these specs drive the floor, not the gate.
 export const VENUES = [
-  { slug: 'demo', name: 'Table Arcade' },
-  { slug: 'annex', name: 'The Annex', botTables: [] }
+  { slug: 'demo', name: 'Table Arcade', requirePairing: false },
+  { slug: 'annex', name: 'The Annex', botTables: [], requirePairing: false }
 ]
 
 // Every tablet is a landscape tablet.

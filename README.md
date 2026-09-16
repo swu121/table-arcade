@@ -49,7 +49,7 @@ Or skip the game entirely and send a round, which goes straight to the bar on th
 
 ## Staff screen
 
-`/staff` has two tabs.
+`/staff` has three tabs.
 
 ![The staff ticket queue](docs/screenshots/staff-tickets.png)
 
@@ -63,6 +63,12 @@ renumbered and reshaped; edits save to `data/venues/<slug>/floorplan.json` and p
 connected tablet in that venue. Selecting a table shows its tab and its activity, and clearing it for the next party
 takes a confirmation listing what's about to go. A stuck tablet can be restarted from here, one
 at a time or all at once, and a tablet that crashed on its own says so in its activity.
+
+**Devices** — the tablets staff have paired with this venue. In production a tablet can't join
+a venue until staff press **Pair a tablet** (here or in the floor plan editor's header), read the
+six-digit code off the screen, and type it into the tablet. The list shows each device's label,
+when it was last seen, and a Revoke button that drops it on the spot. See
+[pairing](docs/FEATURES.md#pairing).
 
 Every build carries a version, and a tablet still running an older one is told to reload the
 next time it connects — at its next idle moment, never mid-game. See
@@ -90,7 +96,7 @@ identical run without streaming any geometry between them.
 ## Venues
 
 One server runs any number of restaurants. Each is a **venue** with its own slug, name, menu,
-bot tables and floor plan, listed in `data/venues.json` (see
+bot tables, floor plan and paired tablets, listed in `data/venues.json` (see
 [`docs/venues.example.json`](docs/venues.example.json)). Onboarding a restaurant is adding an
 entry there; nothing gets deployed.
 
@@ -106,9 +112,14 @@ construction rather than by a check. `server/rooms.test.js` proves it.
 
 Live state — who's seated, challenges, games, chat — lives in memory, and stopping the process
 wipes it. What has to outlive a deploy goes through a small repository layer (`server/db/`):
-venues, floor plans and tickets. Set `DATABASE_URL` and those live in Postgres; leave it unset
-and venues and plans are JSON under `data/` (or `DATA_DIR`) with tickets kept in memory. There's
-no auth yet.
+venues, floor plans, tickets and paired devices. Set `DATABASE_URL` and those live in Postgres;
+leave it unset and venues, plans and devices are JSON under `data/` (or `DATA_DIR`) with tickets
+kept in memory.
+
+A guest tablet needs a device token to join a venue — staff issue one by pairing it with a
+six-digit code — so knowing a venue's URL isn't enough to put items on a real tab. Pairing is
+enforced when `NODE_ENV=production` (or per venue with `requirePairing` in the venue row); the
+dev server leaves it off. The staff screen itself has no login yet; that's next.
 
 ## Running it
 
@@ -123,7 +134,7 @@ npm run dev
 `npm run dev` prints every venue with a LAN address, which is what the tablets actually point at.
 
 ```sh
-npm test            # game rules, venue isolation, persistence backends — no database needed
+npm test            # game rules, venue isolation, persistence, pairing — no database needed
 npm run test:e2e    # browser tests: tablets and staff screen, in Chromium
 npm run build       # production client bundle
 npm start           # serve the built client from the node server
@@ -159,6 +170,7 @@ server/
   index.js        http + socket.io entry
   venues.js       the venue list: slug, name, menu, bot tables
   handlers.js     lobby, challenges, games, tickets — one room per venue
+  pairing.js      pairing codes, the device-token handshake, POST /api/venue/:slug/pair
   state.js        createRoom(): per-venue in-memory tables/games/tickets/chat
   floorplan.js    per-venue layout: default plan, validation, in-room store
   rooms.test.js   two venues on one server can't reach each other; rooms rehydrate

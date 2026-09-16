@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { socket } from '../socket.js'
+import { PairCodeButton } from '../components/PairCode.jsx'
 import { FloorPlan } from '../components/FloorPlan.jsx'
 import { TableInsight } from '../components/TableInsight.jsx'
 import { ClearTableDialog } from '../components/ClearTableDialog.jsx'
@@ -395,6 +396,7 @@ export function FloorPlanEditor({ floorplan, floor = [], tickets = [] }) {
         </div>
 
         <div className="flex items-center gap-2">
+          <PairCodeButton />
           {confirmReloadAll ? (
             <>
               <span className="text-xs text-dim">Every idle tablet restarts; busy ones wait.</span>

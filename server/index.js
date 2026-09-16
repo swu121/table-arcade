@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { Server } from 'socket.io'
 import { createRepos } from './db/index.js'
 import { init, reportClientError } from './handlers.js'
+import { pairHandler } from './pairing.js'
 import { loadVenues } from './venues.js'
 import { loadVersion } from './version.js'
 
@@ -49,6 +50,9 @@ app.post('/api/client-error', express.json({ limit: '32kb' }), (req, res) => {
   reportClientError(room, req.body)
   res.status(204).end()
 })
+
+// A tablet trades a staff-issued pairing code for its device token here.
+app.post('/api/venue/:slug/pair', express.json({ limit: '4kb' }), pairHandler({ roomFor }))
 
 // The bare URL is the single-venue demo: it lands on the first venue listed.
 // Vite serves the client in dev, so the client asks for this instead of being

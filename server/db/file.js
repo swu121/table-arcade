@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { normalise } from '../venues.js'
 import { createMemoryTickets } from './memory.js'
+import { createDevicesRepo } from './devices.js'
 
 // What the server did before there was a database: venues in
 // <dataDir>/venues.json, each venue's layout in
@@ -11,6 +12,7 @@ import { createMemoryTickets } from './memory.js'
 export function createFileRepos(dataDir) {
   const venuesFile = path.join(dataDir, 'venues.json')
   const planFile = (slug) => path.join(dataDir, 'venues', slug, 'floorplan.json')
+  const devicesFile = (slug) => path.join(dataDir, 'venues', slug, 'devices.json')
 
   function readJson(file) {
     try {
@@ -33,6 +35,37 @@ export function createFileRepos(dataDir) {
     return map
   }
 
+  // Paired tablets, one devices.json per venue next to its floor plan. A
+  // token lookup has no venue to hand, so it reads every venue's file; there
+  // are a handful of venues and a connect is rare, so that is fine.
+  function venueDirs() {
+    try {
+      return fs
+        .readdirSync(path.join(dataDir, 'venues'), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+    } catch {
+      return []
+    }
+  }
+
+  const deviceRecords = (slug) => {
+    const raw = readJson(devicesFile(slug))
+    return Array.isArray(raw) ? raw.filter((d) => d && typeof d.id === 'string') : []
+  }
+
+  const deviceStore = {
+    all: () => venueDirs().flatMap((slug) => deviceRecords(slug).map((d) => ({ ...d, venue: slug }))),
+    put: (record) => {
+      const list = deviceRecords(record.venue)
+      const at = list.findIndex((d) => d.id === record.id)
+      const { venue: _venue, ...entry } = record
+      if (at === -1) list.push(entry)
+      else list[at] = entry
+      writeJson(devicesFile(record.venue), list)
+    }
+  }
+
   return {
     backend: 'file',
     dataDir,
@@ -45,6 +78,7 @@ export function createFileRepos(dataDir) {
         const raw = readJson(venuesFile)
         const list = Array.isArray(raw) ? raw : []
         const entry = { slug: venue.slug, name: venue.name, menu: venue.menu, botTables: venue.botTables }
+        if (typeof venue.requirePairing === 'boolean') entry.requirePairing = venue.requirePairing
         const at = list.findIndex((v) => v?.slug === venue.slug)
         if (at === -1) list.push(entry)
         else list[at] = entry
@@ -63,6 +97,8 @@ export function createFileRepos(dataDir) {
     },
 
     tickets: createMemoryTickets(bucket),
+
+    devices: createDevicesRepo(deviceStore),
 
     async close() {}
   }

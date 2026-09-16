@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createFileRepos, createMemoryRepos } from './index.js'
+import { hashToken } from './devices.js'
 
 // One contract, every backend. Memory and file always run; Postgres runs only
 // when DATABASE_URL points somewhere, so `npm test` never needs a database.
@@ -15,7 +16,8 @@ const venue = (slug) => ({
   slug,
   name: 'North',
   menu: [{ id: 'soju', name: 'Soju', price: 12, icon: 'shot' }],
-  botTables: [12]
+  botTables: [12],
+  requirePairing: false
 })
 
 const PLAN = {
@@ -91,6 +93,47 @@ function contract(name, open, { skip = false } = {}) {
     assert.deepEqual(await repos.tickets.openFor(north), [])
     assert.deepEqual((await repos.tickets.openFor(south)).map((x) => x.id), ['tk_3'])
   })
+
+  test(`${name}: devices are issued once in plaintext, found by hash, listed per venue, revoked and touched`, { skip }, async (t) => {
+    const repos = await open(t)
+    const north = stamp()
+    const south = stamp()
+    await repos.venues.upsert(venue(north))
+    await repos.venues.upsert(venue(south))
+
+    const issued = await repos.devices.issue({ venue: north, label: '  Bar left  ' })
+    assert.match(issued.token, /^[A-Za-z0-9_-]{43}$/)
+    assert.equal(issued.venue, north)
+    assert.equal(issued.label, 'Bar left')
+    assert.equal(issued.revokedAt, null)
+    assert.equal(issued.lastSeenAt, null)
+    const other = await repos.devices.issue({ venue: south })
+    assert.equal(other.label, 'Tablet')
+    assert.notEqual(other.token, issued.token)
+
+    // Only the hash is stored: the plaintext token is never a lookup key.
+    assert.equal(await repos.devices.find(issued.token), null)
+    const found = await repos.devices.find(hashToken(issued.token))
+    assert.equal(found.id, issued.id)
+    assert.equal(found.venue, north)
+    assert.equal('token' in found, false)
+    assert.equal(await repos.devices.find(hashToken('nope')), null)
+
+    assert.deepEqual((await repos.devices.list(north)).map((d) => d.id), [issued.id])
+    assert.deepEqual((await repos.devices.list(south)).map((d) => d.id), [other.id])
+
+    const at = Date.now() - 5000
+    await repos.devices.touch(issued.id, at)
+    assert.equal((await repos.devices.find(hashToken(issued.token))).lastSeenAt, at)
+
+    assert.equal(await repos.devices.revoke(issued.id), true)
+    assert.equal(await repos.devices.revoke(issued.id), false)
+    assert.equal(await repos.devices.revoke('d_missing'), false)
+    // A revoked device is still findable, so the handshake can say why.
+    assert.ok((await repos.devices.find(hashToken(issued.token))).revokedAt > 0)
+    assert.deepEqual(await repos.devices.list(north), [])
+    assert.deepEqual((await repos.devices.list(south)).map((d) => d.id), [other.id])
+  })
 }
 
 contract('memory', async (t) => {
@@ -128,6 +171,22 @@ test('file: venues and floor plans are on disk where the server has always kept 
   assert.deepEqual(await second.floorplans.get('north'), PLAN)
   // ...and not the ticket: without a database, tickets last as long as the process.
   assert.deepEqual(await second.tickets.openFor('north'), [])
+})
+
+test('file: devices live in venues/<slug>/devices.json, hashed, and outlive the process', async (t) => {
+  const dir = tempDir(t)
+  const first = createFileRepos(dir)
+  const issued = await first.devices.issue({ venue: 'north', label: 'Patio' })
+
+  const file = path.join(dir, 'venues', 'north', 'devices.json')
+  assert.ok(fs.existsSync(file))
+  const onDisk = fs.readFileSync(file, 'utf8')
+  assert.ok(!onDisk.includes(issued.token), 'the plaintext token is never written')
+  assert.ok(onDisk.includes(hashToken(issued.token)))
+
+  const second = createFileRepos(dir)
+  assert.equal((await second.devices.find(hashToken(issued.token))).id, issued.id)
+  assert.deepEqual((await second.devices.list('north')).map((d) => d.label), ['Patio'])
 })
 
 test('file: a hand-edited venues.json still normalises', async (t) => {
