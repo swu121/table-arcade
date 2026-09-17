@@ -35,7 +35,7 @@ test('two tables play Connect 4 for a menu item, one forfeits, staff get a ticke
 
   // The result is written into the thread the challenge started from.
   await a.getByRole('button', { name: 'Back to the lobby' }).click()
-  await expect(a.getByText('Table 3 walked away from Connect 4. Truffle Fries is on Table 3.')).toBeVisible()
+  await expect(a.getByText("Table 3 walked away from Connect 4. Table 3's tab covers the Truffle Fries.")).toBeVisible()
 
   // And the loser's tab shows up on the staff screen.
   const staff = await floor.staff('demo')

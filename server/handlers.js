@@ -803,7 +803,7 @@ function endGame(room, game, winner, reason) {
         : reason === 'forfeit'
           ? `Table ${loser} never came back to ${mod.name}.`
           : `Table ${winner} beat Table ${loser} at ${mod.name}.`
-    note(room, a, b, 'result', `${how} ${game.item.name} is on Table ${loser}.`, { winner })
+    note(room, a, b, 'result', `${how} Table ${loser}'s tab covers the ${game.item.name}.`, { winner })
   }
 
   room.games.delete(game.id)
@@ -1142,6 +1142,17 @@ function onConnection(room, socket) {
 
     log(from, { kind: 'gift', direction: 'out', otherTable: target.number, item: menuItem })
     log(target, { kind: 'gift', direction: 'in', otherTable: from.number, item: menuItem })
+
+    // A round opens the conversation, the way a challenge does: the note gives
+    // the thread a first line, and the pair now counts as acquainted on both
+    // floor plans, so either of them can just tap and talk back.
+    note(
+      room,
+      from.number,
+      target.number,
+      'gift',
+      `Table ${from.number} sent Table ${target.number} a ${menuItem.name}.`
+    )
 
     notify(target, { kind: 'gift', fromTable: from.number, item: menuItem })
     socketFor(room, target)?.emit('gift:incoming', { fromTable: from.number, item: menuItem })

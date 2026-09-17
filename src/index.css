@@ -582,6 +582,12 @@ button {
   border-color: rgba(46, 229, 157, 0.3);
 }
 
+.chat-system--gift {
+  color: #f59440;
+  background: rgba(224, 112, 13, 0.1);
+  border-color: rgba(224, 112, 13, 0.35);
+}
+
 .chat-system--challengeEnded {
   color: var(--color-dim);
   background: rgba(255, 255, 255, 0.03);

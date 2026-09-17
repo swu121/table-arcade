@@ -83,15 +83,40 @@ app.get('/api/venue', (_req, res) => {
   res.json({ slug: venue.slug, name: venue.name })
 })
 
+const A_YEAR = 365 * 24 * 60 * 60
+
 if (process.env.NODE_ENV === 'production') {
   app.get(['/', '/staff'], (req, res) => res.redirect(`/v/${venues.default().slug}${req.path === '/' ? '' : req.path}`))
   // With no operator configured there is no admin page to fall through to.
   app.get('/admin', adminPage())
-  app.use(express.static(dist, { maxAge: '1h', index: false }))
+  // Vite puts a content hash in every filename under /assets, so those bytes
+  // can never change meaning: a tablet that already has them should never ask
+  // for them again. Everything else keeps its name across deploys, so it gets a
+  // short life and a revalidation instead.
+  app.use(
+    express.static(dist, {
+      index: false,
+      maxAge: '1h',
+      setHeaders(res, filePath) {
+        if (/[\\/]assets[\\/]/.test(filePath)) {
+          res.setHeader('Cache-Control', `public, max-age=${A_YEAR}, immutable`)
+        } else if (filePath.endsWith('sw.js')) {
+          // The worker decides what every other request does, so a stale copy
+          // of it outlives the deploy that was meant to replace it.
+          res.setHeader('Cache-Control', 'no-cache')
+        }
+      }
+    })
+  )
   app.use((req, res, next) => {
-    if (req.method !== 'GET') return next()
+    // HEAD too: a monitor probing a venue URL should see what a browser sees.
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next()
     // Anchored at dist so the dotfiles check only sees "index.html", not the
     // directories above it — a checkout under a dot-directory would 404.
+    //
+    // Never cached: this shell names the hashed bundles it loads, so a stale
+    // copy would keep a tablet on the previous build after a deploy.
+    res.setHeader('Cache-Control', 'no-cache')
     res.sendFile('index.html', { root: dist })
   })
 }
