@@ -263,3 +263,31 @@ test('a room made before its first socket still answers', async (t) => {
   assert.equal(sync.self.number, 4)
   assert.equal(sync.venue.slug, 'north')
 })
+
+// A tablet shows "Connecting" until its first state:sync arrives, and one that
+// remembers a table claims it on connect instead of saying hello — so a claim
+// that is refused and says nothing else strands that tablet for good.
+test('a refused claim still answers with a sync, so a tablet never hangs on connecting', async (t) => {
+  const server = await boot()
+  const north = tablet(server, 'north')
+  t.after(() => server.close(north))
+  await once(north, 'connect')
+  await north.syncs.next() // the one every socket gets on connection
+
+  // 12 is north's bot. A tablet that was sat at 12 before a bot was seated
+  // there re-claims it on every reconnect, and is refused every time.
+  north.emit('table:claim', { tableNumber: 12 })
+  assert.equal((await north.errors.next()).code, 'TABLE_TAKEN')
+  const refused = await north.syncs.next()
+  assert.equal(refused.self, null)
+  assert.deepEqual(refused.lobby.map((table) => table.number), [12])
+
+  // Same for a number that could never be a table.
+  north.emit('table:claim', { tableNumber: 0 })
+  assert.equal((await north.errors.next()).code, 'BAD_TABLE')
+  assert.equal((await north.syncs.next()).self, null)
+
+  // And the socket is still good: a real table still works.
+  const seated = await seat(north, 4)
+  assert.equal(seated.self.number, 4)
+})

@@ -447,6 +447,17 @@ function fail(socket, code, message) {
   socket.emit('app:error', { code, message })
 }
 
+// A refused claim still owes the tablet a sync. A tablet that remembers a table
+// emits table:claim on connect instead of state:hello, so when the claim is the
+// thing that fails, nothing else ever answers: the app never gets a first state
+// and sits on the connecting screen for good — with the error invisible, since
+// that screen renders above the toast. Answer with the room as it stands and
+// the tablet lands on the table picker, reason on screen, able to pick another.
+function refuseClaim(room, socket, code, message) {
+  fail(socket, code, message)
+  socket.emit('state:sync', buildSync(room, currentTable(room, socket)))
+}
+
 /* ----------------------------------------------------------- challenges --- */
 
 function clearChallengeTimer(challenge) {
@@ -921,12 +932,12 @@ function onConnection(room, socket) {
   socket.on('table:claim', ({ tableNumber } = {}) => {
     const number = Number(tableNumber)
     if (!Number.isInteger(number) || number < 1 || number > 99) {
-      return fail(socket, 'BAD_TABLE', 'Pick a table number between 1 and 99.')
+      return refuseClaim(room, socket, 'BAD_TABLE', 'Pick a table number between 1 and 99.')
     }
 
     const existing = room.tables.get(number)
     if (existing?.isBot) {
-      return fail(socket, 'TABLE_TAKEN', `Table ${number} is already in play.`)
+      return refuseClaim(room, socket, 'TABLE_TAKEN', `Table ${number} is already in play.`)
     }
 
     // This socket was previously bound to a different table.
