@@ -101,13 +101,8 @@ function drawBottle(ctx, px, py, h, angle) {
   ctx.restore()
 }
 
-function drawSky(ctx, w, h, camX) {
-  const sky = ctx.createLinearGradient(0, 0, 0, h)
-  sky.addColorStop(0, '#090913')
-  sky.addColorStop(0.45, '#1a1130')
-  sky.addColorStop(1, '#39163f')
-  ctx.fillStyle = sky
-  ctx.fillRect(0, 0, w, h)
+function drawSky(ctx, w, h, camX, sky) {
+  ctx.drawImage(sky, 0, 0, w, h)
 
   const moonX = w * 0.78 - camX * 0.02 * h
   ctx.fillStyle = 'rgba(247,245,240,0.9)'
@@ -239,7 +234,13 @@ export function Flappy({ game, act, onExit }) {
 
   const flap = useCallback(() => {
     const sim = simRef.current
-    if (!sim || sim.phase !== 'flying' || gameRef.current.opponentGone) return
+    if (!sim || gameRef.current.opponentGone) return
+    if (sim.phase === 'armed') {
+      // The first tap is what launches the bottle, so the run starts when the
+      // player is ready rather than the instant the countdown clears.
+      sim.phase = 'flying'
+      setPhase('flying')
+    } else if (sim.phase !== 'flying') return
     sim.v = FLAP_V
     for (let i = 0; i < 5; i++) {
       sim.puffs.push({
@@ -294,6 +295,26 @@ export function Flappy({ game, act, onExit }) {
     }
     simRef.current = sim
 
+    // Filling the sky gradient was costing about half of every frame — a
+    // per-pixel gradient evaluation over the whole stage, for a backdrop that
+    // never changes. Paint it once at this size and blit the result instead;
+    // the stars and skylines over it are cheap enough to keep drawing live.
+    let skyImg = null
+    const buildSky = (w, h, dpr) => {
+      const c = document.createElement('canvas')
+      c.width = Math.round(w * dpr)
+      c.height = Math.round(h * dpr)
+      const sx = c.getContext('2d')
+      sx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      const g = sx.createLinearGradient(0, 0, 0, h)
+      g.addColorStop(0, '#090913')
+      g.addColorStop(0.45, '#1a1130')
+      g.addColorStop(1, '#39163f')
+      sx.fillStyle = g
+      sx.fillRect(0, 0, w, h)
+      skyImg = c
+    }
+
     const resize = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 3)
       const w = stage.clientWidth
@@ -304,6 +325,7 @@ export function Flappy({ game, act, onExit }) {
       canvas.width = Math.round(w * dpr)
       canvas.height = Math.round(h * dpr)
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      buildSky(w, h, dpr)
     }
     resize()
     const ro = new ResizeObserver(resize)
@@ -336,7 +358,7 @@ export function Flappy({ game, act, onExit }) {
       }
       for (let i = sim.puffs.length - 1; i >= 0; i--) if (sim.puffs[i].life <= 0) sim.puffs.splice(i, 1)
 
-      if (sim.phase === 'ready') {
+      if (sim.phase === 'ready' || sim.phase === 'armed') {
         sim.y = 0.5 + Math.sin(sim.t * 3.4) * 0.022
         return
       }
@@ -391,6 +413,7 @@ export function Flappy({ game, act, onExit }) {
     }
 
     const draw = (alpha) => {
+      if (!skyImg) return
       const w = sim.cssW
       const h = sim.cssH
       const x = sim.prevX + (sim.x - sim.prevX) * alpha
@@ -403,7 +426,7 @@ export function Flappy({ game, act, onExit }) {
         ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s)
       }
 
-      drawSky(ctx, w, h, camX)
+      drawSky(ctx, w, h, camX, skyImg)
 
       const from = Math.max(0, Math.floor((camX - PIPE_HW) / GATE_SPACING) - 2)
       const to = Math.min(gates.length - 1, Math.ceil((camX + VIEW_W) / GATE_SPACING) + 1)
@@ -469,9 +492,8 @@ export function Flappy({ game, act, onExit }) {
       }
 
       if (sim.phase === 'ready' && wall >= startsAt) {
-        sim.phase = 'flying'
-        sim.v = FLAP_V * 0.6
-        setPhase('flying')
+        sim.phase = 'armed'
+        setPhase('armed')
       }
 
       if (gameRef.current.opponentGone) {
@@ -513,13 +535,15 @@ export function Flappy({ game, act, onExit }) {
     ? { head: 'Paused', note: 'Waiting for the other table' }
     : phase === 'ready'
       ? { head: 'Get ready', note: 'Tap anywhere to flap' }
-      : phase === 'flying'
-        ? oppDone
-          ? { head: `Beat ${oppScore}`, note: `Table ${pad(game.opponent)} is done — keep flying` }
-          : { head: 'Fly', note: 'Tap anywhere to flap' }
-        : reason === 'cleared'
-          ? { head: 'Course cleared', note: oppDone ? 'Scoring…' : `Waiting on Table ${pad(game.opponent)}` }
-          : { head: "You're out", note: oppDone ? 'Scoring…' : `Waiting on Table ${pad(game.opponent)}` }
+      : phase === 'armed'
+        ? { head: 'Go', note: 'Tap to launch the bottle' }
+        : phase === 'flying'
+          ? oppDone
+            ? { head: `Beat ${oppScore}`, note: `Table ${pad(game.opponent)} is done — keep flying` }
+            : { head: 'Fly', note: 'Tap anywhere to flap' }
+          : reason === 'cleared'
+            ? { head: 'Course cleared', note: oppDone ? 'Scoring…' : `Waiting on Table ${pad(game.opponent)}` }
+            : { head: "You're out", note: oppDone ? 'Scoring…' : `Waiting on Table ${pad(game.opponent)}` }
 
   const aside = (
     <>
@@ -590,7 +614,7 @@ export function Flappy({ game, act, onExit }) {
           </div>
         )}
 
-        {count < 0 && phase === 'flying' && score === 0 && (
+        {count < 0 && (phase === 'armed' || (phase === 'flying' && score === 0)) && (
           <div className="fl-hint">
             <span className="overline">Tap anywhere to flap</span>
           </div>
