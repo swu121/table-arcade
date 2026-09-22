@@ -40,9 +40,14 @@
 }
 
 html,
-body,
-#root {
+body {
   height: 100%;
+}
+
+/* --app-height tracks the visual viewport (see lib/viewport.js), so the shell
+   shrinks above the on-screen keyboard instead of hiding behind it. */
+#root {
+  height: var(--app-height, 100%);
 }
 
 body {

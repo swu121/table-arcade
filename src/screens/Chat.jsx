@@ -72,6 +72,19 @@ export function Chat({
     if (node) node.scrollTop = node.scrollHeight
   }, [messages, live])
 
+  // The keyboard shrinks the shell under us; follow it down so the newest
+  // message stays in view instead of scrolling off the top of the log.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return undefined
+    const stick = () => {
+      const node = list.current
+      if (node) node.scrollTop = node.scrollHeight
+    }
+    vv.addEventListener('resize', stick)
+    return () => vv.removeEventListener('resize', stick)
+  }, [])
+
   const lastMine = messages.findLastIndex((message) => message.from === self.number)
   const blocker = challengeBlocker({ self, other, blocked, live })
 
@@ -81,7 +94,10 @@ export function Chat({
     onSend(body)
     setDraft('')
     setPicker(false)
-    input.current?.focus()
+    // On a tablet the keyboard covers half the thread, so drop focus and let it
+    // go once the message is away. A mouse has no such cost — keep typing.
+    if (window.matchMedia('(pointer: coarse)').matches) input.current?.blur()
+    else input.current?.focus()
   }
 
   return (
