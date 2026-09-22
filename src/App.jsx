@@ -317,9 +317,14 @@ function TabletApp() {
   }
 
   const sendGift = ({ item }) => {
-    socket.emit('gift:send', { toTable: giftTarget.number, item })
+    const toTable = giftTarget.number
+    socket.emit('gift:send', { toTable, item })
     setGiftTarget(null)
     setView('home')
+    // A round opens the thread the way a challenge does. The server has already
+    // written the note into it, so land in the conversation and watch it arrive.
+    // Sent from inside the thread already, this is a no-op.
+    if (chatWith !== toTable) openChatWith(toTable)
   }
 
   // The floor plan hands back the drawn table, which knows nothing about the

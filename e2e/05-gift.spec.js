@@ -18,20 +18,21 @@ test('a gift goes straight to the bar and gets delivered', async ({ floor }) => 
   await expect(b.getByText("Table 7 sent you a House Shot — it's on them.")).toBeVisible()
   await expect(b.getByRole('button', { name: 'Inbox, 1 new' })).toBeVisible()
 
-  // The round opens the conversation: both ends have the thread, with the note
-  // as its first line, and either can tap the other on the plan to talk back.
+  // The round opens the conversation and drops the sender into it, the way a
+  // challenge does, with the note as the thread's first line.
   const note = 'Table 7 sent Table 8 a House Shot.'
+  await expect(a.getByPlaceholder('Message Table 08')).toBeVisible()
+  await expect(a.getByText(note, { exact: true })).toBeVisible()
+
+  // The other end has the same thread, reachable by tapping back on the plan.
   await homeTile(b, 'Challenge').click()
   await pickTableOnPlan(b, 7)
   await expect(b.getByText(note, { exact: true })).toBeVisible()
 
+  // And the sender is still sitting in it, so the reply lands in front of them.
   const reply = 'you legend'
   await b.getByPlaceholder('Message Table 07').fill(reply)
   await b.keyboard.press('Enter')
-
-  await homeTile(a, 'Challenge').click()
-  await pickTableOnPlan(a, 8)
-  await expect(a.getByText(note, { exact: true })).toBeVisible()
   await expect(a.getByText(reply, { exact: true })).toBeVisible()
 
   const staff = await floor.staff('demo')
