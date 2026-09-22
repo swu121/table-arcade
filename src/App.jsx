@@ -17,6 +17,7 @@ import { Home } from './screens/Home.jsx'
 import { Lobby } from './screens/Lobby.jsx'
 import { Chat } from './screens/Chat.jsx'
 import { WagerSheet } from './screens/WagerSheet.jsx'
+import { GiftReveal } from './components/GiftReveal.jsx'
 import { GiftSheet } from './screens/GiftSheet.jsx'
 import { Game } from './screens/Game.jsx'
 import { Result } from './screens/Result.jsx'
@@ -147,6 +148,8 @@ function TabletApp() {
   const [view, setView] = useState('home')
   const [wagerTarget, setWagerTarget] = useState(null)
   const [giftTarget, setGiftTarget] = useState(null)
+  // The round on screen right now: one arriving, or one just sent off.
+  const [reveal, setReveal] = useState(null)
   const [chatWith, setChatWith] = useState(null)
   const [setup, setSetup] = useState(false)
   const [threads, setThreads] = useState({})
@@ -156,6 +159,10 @@ function TabletApp() {
   const openChat = useRef(null)
   openChat.current = chatWith
 
+  // A round arriving mid-game would cover the board someone is playing on.
+  const playing = useRef(false)
+  playing.current = Boolean(sync?.game)
+
   // Only tables the server actually confirmed get re-claimed on reconnect.
   const claimed = useRef(null)
 
@@ -164,7 +171,7 @@ function TabletApp() {
   // A reload restores the table number but not the screen, so it only happens
   // while there is nothing on screen worth keeping.
   useReloadPolicy(
-    Boolean(sync?.game || sync?.challenge || sync?.lastResult || chatWith !== null || wagerTarget || giftTarget)
+    Boolean(sync?.game || sync?.challenge || sync?.lastResult || chatWith !== null || wagerTarget || giftTarget || reveal)
   )
 
   useEffect(() => {
@@ -205,12 +212,18 @@ function TabletApp() {
       showToast(`Table ${fromTable}: ${preview}`, 'good')
     }
 
-    const onGiftIncoming = ({ fromTable, item }) => {
-      showToast(`Table ${fromTable} sent you a ${item.name} — it's on them.`, 'good')
+    const onGiftIncoming = ({ fromTable, item, giftId }) => {
+      // Mid-game the board is the screen; the round waits in the thread, where
+      // the card still carries it, and a toast says it's there.
+      if (playing.current) {
+        showToast(`Table ${fromTable} sent you a ${item.name} — it's on them.`, 'good')
+        return
+      }
+      setReveal({ mode: 'incoming', fromTable, item, giftId })
     }
 
     const onGiftSent = ({ toTable, item }) => {
-      showToast(`${item.name} on its way to Table ${toTable}.`, 'good')
+      setReveal({ mode: 'sent', toTable, item })
     }
 
     socket.on('connect', onConnect)
@@ -454,6 +467,22 @@ function TabletApp() {
           menu={sync.menu}
           onCancel={() => setGiftTarget(null)}
           onSend={sendGift}
+        />
+      )}
+
+      {reveal && (
+        <GiftReveal
+          key={reveal.giftId ?? reveal.mode}
+          mode={reveal.mode}
+          fromTable={reveal.fromTable}
+          toTable={reveal.toTable}
+          item={reveal.item}
+          onClose={() => {
+            // Tapping through is the acknowledgement the sender sees.
+            if (reveal.mode === 'incoming' && reveal.giftId) socket.emit('gift:open', { giftId: reveal.giftId })
+            setReveal(null)
+            if (reveal.mode === 'incoming') openChatWith(reveal.fromTable)
+          }}
         />
       )}
 

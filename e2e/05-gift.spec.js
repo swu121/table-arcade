@@ -14,20 +14,24 @@ test('a gift goes straight to the bar and gets delivered', async ({ floor }) => 
   await a.getByRole('button', { name: /House Shot/ }).click()
   await a.getByRole('button', { name: 'Send Table 08 a House Shot' }).click()
 
-  await expect(a.getByText('House Shot on its way to Table 8.')).toBeVisible()
-  await expect(b.getByText("Table 7 sent you a House Shot — it's on them.")).toBeVisible()
+  // The sender watches it go, and the round lands on the other tablet as a
+  // reveal rather than a toast.
+  await expect(a.getByText('is getting a House Shot.')).toBeVisible()
+  await expect(b.getByText('sent you a House Shot.')).toBeVisible()
   await expect(b.getByRole('button', { name: 'Inbox, 1 new' })).toBeVisible()
 
   // The round opens the conversation and drops the sender into it, the way a
-  // challenge does, with the note as the thread's first line.
-  const note = 'Table 7 sent Table 8 a House Shot.'
+  // challenge does, with the gift card as the thread's first line. Until the
+  // other table opens it, the receipt only says it arrived.
   await expect(a.getByPlaceholder('Message Table 08')).toBeVisible()
-  await expect(a.getByText(note, { exact: true })).toBeVisible()
+  await expect(a.getByText('You sent a House Shot')).toBeVisible()
+  await expect(a.getByText('Received by Table 08')).toBeVisible()
 
-  // The other end has the same thread, reachable by tapping back on the plan.
-  await homeTile(b, 'Challenge').click()
-  await pickTableOnPlan(b, 7)
-  await expect(b.getByText(note, { exact: true })).toBeVisible()
+  // Tapping through the reveal is the acknowledgement, and it lands B in the
+  // same thread — which the sender sees on their own card.
+  await b.getByRole('button', { name: 'Nice — say thanks' }).click()
+  await expect(b.getByText('Table 07 sent you a House Shot')).toBeVisible()
+  await expect(a.getByText('Opened by Table 08')).toBeVisible()
 
   // And the sender is still sitting in it, so the reply lands in front of them.
   const reply = 'you legend'
@@ -45,4 +49,8 @@ test('a gift goes straight to the bar and gets delivered', async ({ floor }) => 
   await ticket.getByRole('button', { name: 'Mark delivered' }).click()
   await expect(ticket.getByText('Delivered')).toBeVisible()
   await expect(ticket.getByRole('button', { name: 'Mark delivered' })).toHaveCount(0)
+
+  // And the bar running it over closes the receipt on both tablets.
+  await expect(a.getByText('Delivered by the bar')).toBeVisible()
+  await expect(b.getByText('Delivered by the bar')).toBeVisible()
 })

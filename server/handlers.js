@@ -612,8 +612,38 @@ function flushDeliveries(room, table) {
   }
 }
 
+// A round's receipt lives on its note in the thread, so both tables read the
+// same line off the same object and a reconnect gets it in the usual sync.
+function giftNote(room, giftId) {
+  for (const thread of room.conversations.values()) {
+    for (const message of thread.messages) {
+      if (message.gift?.id === giftId) return message
+    }
+  }
+  return null
+}
+
+function stampGift(room, message, field) {
+  if (!message?.gift || message.gift[field]) return false
+  message.gift[field] = Date.now()
+  const sender = room.tables.get(message.gift.fromTable)
+  const recipient = room.tables.get(message.gift.toTable)
+  if (sender) pushThread(room, sender, message.gift.toTable)
+  if (recipient) pushThread(room, recipient, message.gift.fromTable)
+  return true
+}
+
 function markRead(room, table, otherNumber) {
-  getThread(room, table.number, otherNumber).readAt[table.number] = Date.now()
+  const thread = getThread(room, table.number, otherNumber)
+  thread.readAt[table.number] = Date.now()
+
+  // A round sent while their tablet was asleep is received the moment they
+  // open the thread and see it.
+  for (const message of thread.messages) {
+    if (message.gift?.toTable === table.number && !message.gift.receivedAt) {
+      message.gift.receivedAt = Date.now()
+    }
+  }
 
   let changed = Boolean(table.unread[otherNumber])
   delete table.unread[otherNumber]
@@ -1162,17 +1192,43 @@ function onConnection(room, socket) {
       from.number,
       target.number,
       'gift',
-      `Table ${from.number} sent Table ${target.number} a ${menuItem.name}.`
+      `Table ${from.number} sent Table ${target.number} a ${menuItem.name}.`,
+      {
+        // The round rides on its own note so the thread can draw the card, and
+        // so the receipt has somewhere to live. A read receipt on a message is
+        // noise; on a round someone is paying for, it's the whole point — the
+        // table that sent it wants to know it landed, was opened, and arrived.
+        gift: {
+          id: ticket.id,
+          item: menuItem,
+          fromTable: from.number,
+          toTable: target.number,
+          receivedAt: socketFor(room, target) ? Date.now() : null,
+          openedAt: null,
+          servedAt: null
+        }
+      }
     )
 
     notify(target, { kind: 'gift', fromTable: from.number, item: menuItem })
-    socketFor(room, target)?.emit('gift:incoming', { fromTable: from.number, item: menuItem })
+    socketFor(room, target)?.emit('gift:incoming', { fromTable: from.number, item: menuItem, giftId: ticket.id })
     socket.emit('gift:sent', { toTable: target.number, item: menuItem })
 
     if (target.isBot) scheduleBotThanks(room, target.number, from.number, menuItem)
 
     syncStaff(room)
     syncAll(room)
+  })
+
+  // The recipient tapped through the round's reveal. That's the acknowledgement
+  // the sender is waiting on, and it's the only read receipt the app still shows.
+  socket.on('gift:open', ({ giftId } = {}) => {
+    const table = currentTable(room, socket)
+    if (!table) return
+    const message = giftNote(room, String(giftId ?? ''))
+    if (!message || message.gift.toTable !== table.number) return
+    if (!message.gift.receivedAt) message.gift.receivedAt = Date.now()
+    stampGift(room, message, 'openedAt')
   })
 
   socket.on('chat:send', ({ toTable, text } = {}) => {
@@ -1412,6 +1468,9 @@ function onConnection(room, socket) {
       ticket.status = 'delivered'
       ticket.deliveredAt = Date.now()
       keep(room, `delivering ticket ${ticket.id}`, () => room.repos.tickets.deliver(room.venue.slug, ticket.id, ticket.deliveredAt))
+      // A gifted round's note says so too, so the table that paid for it sees
+      // the drink land without asking anyone.
+      stampGift(room, giftNote(room, ticket.id), 'servedAt')
       syncStaff(room)
     })
   )

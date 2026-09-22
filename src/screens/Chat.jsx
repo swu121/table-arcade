@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { EmojiPicker } from '../components/EmojiPicker.jsx'
+import { ItemIcon } from '../components/ItemIcon.jsx'
 import { pad } from '../lib/format.js'
 import { LiveChallenge } from './Challenge.jsx'
 
@@ -13,6 +14,37 @@ function BackIcon() {
 
 function stamp(at) {
   return new Date(at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+// The one receipt the app still shows. A round costs someone money and is
+// handed over by a third party, so both tables get to watch it land; an
+// ordinary message doesn't earn that.
+function giftReceipt(gift, mine) {
+  if (gift.servedAt) return 'Delivered by the bar'
+  if (!mine) return 'On its way from the bar'
+  if (gift.openedAt) return `Opened by Table ${pad(gift.toTable)}`
+  if (gift.receivedAt) return `Received by Table ${pad(gift.toTable)}`
+  return 'Sent to the bar'
+}
+
+function GiftCard({ gift, mine, at }) {
+  return (
+    <div className="gift-card">
+      <div className="gift-card-icon">
+        <ItemIcon name={gift.item.icon} size={32} />
+      </div>
+      <div className="min-w-0">
+        <div className="gift-card-line">
+          {mine ? `You sent a ${gift.item.name}` : `Table ${pad(gift.fromTable)} sent you a ${gift.item.name}`}
+        </div>
+        <div className="gift-card-foot">
+          <span className="gift-card-status">{giftReceipt(gift, mine)}</span>
+          <span aria-hidden="true">·</span>
+          <span>{stamp(at)}</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // Only the newest outgoing message carries a receipt — a column of them down the
@@ -170,6 +202,16 @@ export function Chat({
         ) : (
           messages.map((message, i) => {
             if (message.system) {
+              if (message.gift) {
+                return (
+                  <GiftCard
+                    key={message.id}
+                    gift={message.gift}
+                    mine={message.gift.fromTable === self.number}
+                    at={message.at}
+                  />
+                )
+              }
               const won = message.kind === 'result' && message.winner === self.number
               const lost = message.kind === 'result' && message.winner != null && message.winner !== self.number
               return (
