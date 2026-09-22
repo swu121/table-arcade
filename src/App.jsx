@@ -395,7 +395,6 @@ function TabletApp() {
         self={sync.self}
         withTable={chatWith}
         messages={threads[chatWith]?.messages ?? []}
-        readAt={threads[chatWith]?.readAt ?? 0}
         other={(sync.lobby ?? []).find((t) => t.number === chatWith) ?? null}
         muted={social.muted.includes(chatWith)}
         blocked={social.blocked.includes(chatWith)}

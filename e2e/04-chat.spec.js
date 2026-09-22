@@ -34,6 +34,7 @@ test('a message reaches the other table, badges it, and reads back', async ({ fl
   await expect(b.getByText('Talking to')).toBeVisible()
   await expect(b.getByText(line, { exact: true })).toBeVisible()
 
-  // Which A sees as a read receipt.
-  await expect(a.getByText('Read', { exact: true })).toBeVisible()
+  // A's receipt stays at Delivered — read state is tracked, never rendered.
+  await expect(a.getByText('Delivered', { exact: true })).toBeVisible()
+  await expect(a.getByText('Read', { exact: true })).toHaveCount(0)
 })

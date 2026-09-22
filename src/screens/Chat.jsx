@@ -17,8 +17,8 @@ function stamp(at) {
 
 // Only the newest outgoing message carries a receipt — a column of them down the
 // thread is noise, and the latest one is the only status anyone is waiting on.
-function receiptFor(message, readAt) {
-  if (readAt >= message.at) return 'Read'
+// The server still tracks when a thread was read; the thread just doesn't show it.
+function receiptFor(message) {
   return message.deliveredAt ? 'Delivered' : 'Sent'
 }
 
@@ -48,7 +48,6 @@ export function Chat({
   withTable,
   other,
   messages,
-  readAt,
   muted,
   blocked,
   challenge,
@@ -175,7 +174,7 @@ export function Chat({
                 <span className="chat-text">{message.text}</span>
                 <div className="chat-foot">
                   <span>{stamp(message.at)}</span>
-                  {i === lastMine && <span className="chat-receipt">{receiptFor(message, readAt)}</span>}
+                  {i === lastMine && <span className="chat-receipt">{receiptFor(message)}</span>}
                 </div>
               </div>
             )
