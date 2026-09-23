@@ -20,6 +20,10 @@ const HIT_HW = 0.04
 const HIT_HH = 0.019
 const GROUND_Y = 0.965
 const REPORT_DELAY = 900
+// How long "Go" stays up. The bottle waits for a tap either way, so this is a
+// flourish, not a delay to sit through.
+const GO_MS = 500
+const BEAT_MS = 800
 
 const hash = (n) => {
   const s = Math.sin(n * 127.1 + 311.7) * 43758.5453
@@ -272,6 +276,7 @@ export function Flappy({ game, act, onExit }) {
 
     const gates = gameRef.current.state?.course?.gates ?? []
     const startsAt = gameRef.current.state?.startsAt ?? Date.now()
+    const beatMs = gameRef.current.state?.beatMs ?? BEAT_MS
 
     const sim = {
       phase: 'ready',
@@ -482,8 +487,8 @@ export function Flappy({ game, act, onExit }) {
       const wall = Date.now()
       const next =
         wall < startsAt
-          ? Math.min(3, Math.max(1, Math.ceil((startsAt - wall) / 1000)))
-          : wall < startsAt + 700
+          ? Math.min(3, Math.max(1, Math.ceil((startsAt - wall) / beatMs)))
+          : wall < startsAt + GO_MS
             ? 0
             : -1
       if (next !== shown) {
@@ -600,10 +605,16 @@ export function Flappy({ game, act, onExit }) {
         <canvas ref={canvasRef} className="fl-canvas" />
 
         {count >= 0 && (
-          <div className="fl-veil fl-veil-dim">
+          <div
+            className="fl-veil fl-veil-dim"
+            style={{ '--fl-beat': `${state.beatMs ?? BEAT_MS}ms`, '--fl-go': `${GO_MS}ms` }}
+          >
             {count > 0 ? (
               <>
-                <span className="fl-ring" />
+                {/* Keyed on the number so the ring restarts with it: one pulse
+                    per beat, instead of a loop of its own drifting against the
+                    count. */}
+                <span key={`ring-${count}`} className="fl-ring" />
                 <span key={count} className="display fl-count tnum">
                   {count}
                 </span>

@@ -1,6 +1,10 @@
 import { makeRng, randomSeed } from './rng.js'
 
-const COUNTDOWN_MS = 3200
+// Three beats of one length. Every number holds for exactly one, and the beat
+// goes out with the game so the clients count and animate against a duration
+// the server actually named — rather than each guessing 1000ms and drifting.
+const BEAT_MS = 800
+const COUNTDOWN_MS = BEAT_MS * 3
 // Nobody plays a bar mini-game for two minutes. If a run never reports in by
 // then the tablet is asleep or wedged, so settle with whatever score we have.
 const MAX_RUN_MS = 120_000
@@ -40,6 +44,7 @@ export function makeRaceGame(config) {
         seed: game.state.seed,
         course: game.state.course,
         startsAt: game.state.startsAt,
+        beatMs: BEAT_MS,
         scoreLabel: config.scoreLabel,
         you: game.state.runs[me],
         opponent: game.state.runs[opponent]

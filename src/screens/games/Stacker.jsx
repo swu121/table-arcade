@@ -21,7 +21,7 @@ function BlockGroup({ left, width, cols, className, style }) {
 }
 
 export function Stacker({ game, act, onExit }) {
-  const { course, startsAt, scoreLabel } = game.state
+  const { course, startsAt, scoreLabel, beatMs = 800 } = game.state
   const { rows, cols, height } = course
 
   const firstWidth = Math.min(cols, rows[0].width)
@@ -109,8 +109,8 @@ export function Stacker({ game, act, onExit }) {
       const now = Date.now()
 
       if (now < startsAt) {
-        // The server's lead-in is a shade over 3s; hold on "3" rather than flash a 4.
-        setCount(clamp(Math.ceil((startsAt - now) / 1000), 1, 3))
+        // One number per beat, the same beat the lead-in was built from.
+        setCount(clamp(Math.ceil((startsAt - now) / beatMs), 1, 3))
         return
       }
       if (!startedRef.current) {
@@ -141,7 +141,7 @@ export function Stacker({ game, act, onExit }) {
     }
     raf = requestAnimationFrame(frame)
     return () => cancelAnimationFrame(raf)
-  }, [startsAt, cols, rows, game.opponentGone])
+  }, [startsAt, beatMs, cols, rows, game.opponentGone])
 
   useEffect(() => {
     const onKey = (e) => {
